@@ -1,0 +1,14 @@
+(ns ceeker.core
+  (:use [ceeker.options])
+  (:gen-class))
+
+(defn -main
+  [& args]
+  (let [as (vec args)]
+    (do
+      (case (args 1)
+        "new" (ceeker-new (args 2))
+        "run" (ceeker-run)
+        "build" (ceeker-build)
+        "auto" (ceeker-auto)
+        nil)))))

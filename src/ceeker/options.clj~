@@ -1,0 +1,22 @@
+(ns ceeker.options
+  (:import (java.io File)))
+
+(defn ceeker-new
+  [file]
+  (do
+    (.mkdir (File. "./") file)
+    (spit (str "./" file "ceekerfile.clj")
+      `{:name ~file
+        :version "0.0.1"
+        :src-path "src/"
+        :inc-path "inc/"})))
+
+(defn ceeker-run
+  []
+  nil)
+(defn ceeker-build
+  []
+  nil)
+(defn ceeker-auto
+  []
+  nil)
