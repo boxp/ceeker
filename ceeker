@@ -1,0 +1,2 @@
+#!/bin/sh
+java -jar ~/program/clojure/ceeker/target/ceeker-0.1.0-SNAPSHOT-standalone.jar $*
