@@ -13,17 +13,17 @@ Auto C build command tool.
 
 ## Usage 
 
-1. Install "ceeker" boot script.
+- Install "ceeker" boot script.
 
-2. Create new ceeker project
+- Create new ceeker project
 
 > ceeker new hoge
 
-3. Build project.
+- Build project.
 
 > ceeker build
 
-4. Start auto build.
+- Start auto build.
 
 > ceeker auto
 
