@@ -1,10 +1,14 @@
 (ns ceeker.options
   (use [clojure.pprint]
-       [clojure.java.shell])
+       [clojure.java.shell]
+       [ceeker.data])
   (require [clojure.string :as st])
   (:import (java.io File FileWriter)))
 
-(def current (System/getProperty "user.dir"))
+(defn current
+  "現在のディレクトリを取得"
+  []
+  (System/getProperty "user.dir"))
 
 (defn gen-gcc
   "Gen gcc commands"
@@ -14,7 +18,7 @@
       (list compiler "-c" src "-o"
         (st/replace
           (st/replace src #"src" "obj")
-          #".c"
+          #".cpp|.c"
           ".o"))
       (map #(str "-I./" %) inc)
       (vec (map #(str "-L./" %) lib)))))
@@ -25,7 +29,7 @@
   (concat
     (list 'sh compiler "-o" name) 
     (doall
-      (map #(str "obj/" %) (.list (File. (str current "/obj")))))
+      (map #(str "obj/" %) (. (File. "obj") list)))
     (doall
       (map #(str "-I" %) inc))
     (doall
@@ -38,12 +42,12 @@
     (println (str "Generating " project "..."))
     (doall
       (map #(.mkdir (File. %)) 
-        [(str current "/" project)
-         (str current "/" project "/src")
-         (str current "/" project "/lib")
-         (str current "/" project "/inc")]))
+        [(str (current) "/" project)
+         (str (current) "/" project "/src")
+         (str (current) "/" project "/lib")
+         (str (current) "/" project "/inc")]))
     (spit 
-      (str current "/" project "/ceekerrc.clj")
+      (str (current) "/" project "/ceekerrc.clj")
       (str
         "{:name \"" project "\"\n"
         " :compiler \"gcc\" \n"
@@ -56,14 +60,14 @@
 (defn ceeker-build
   []
   (let [rc (try
-             (load-file (str current "/ceekerrc.clj"))
+             (load-file (str (current) "/ceekerrc.clj"))
              (catch Exception e 
                (do 
                  (println (.getMessage e))
                  (System/exit 0))))
         timestamp (ref
                     (try
-                      (load-file (str current "/.tmp"))
+                      (load-file (str (current) "/.tmp"))
                       (catch Exception e {})))]
      (do
        (.mkdir (File. "obj"))
@@ -120,52 +124,60 @@
 (defn ceeker-run
   []
   (let [rc (try
-             (load-file (str current "/ceekerrc.clj"))
+             (load-file (str (current) "/ceekerrc.clj"))
              (catch Exception e 
                (.getMessage e)))]
   nil))
 (defn ceeker-auto
   []
-  (let [rc (try
-             (load-file (str current "/ceekerrc.clj"))
+  (let [rc (try ; 設定ファイル読み込み
+             (load-file (str (current) "/ceekerrc.clj"))
              (catch Exception e 
                (.getMessage e)))
-        timestamp (ref
+        timestamp (ref ;タイムスタンプファイルの読み込み
                     (try
-                      (load-file (str current "/.tmp"))
+                      (load-file (str (current) "/.tmp"))
                       (catch Exception e {})))]
      (do
+       ; objフォルダの生成
        (.mkdir (File. "obj"))
        (while true
          (do
+           ; 待機時間
            (Thread/sleep 1000)
            ; 全てのファイルが更新済み且つオブジェクトが存在するか．
-           (if (and
+           (if ;(and
                  (every? 
                    #(= 
                      ((keyword %) @timestamp)
                      (.lastModified (File. (str "src/" %))))
                    (.list (File. "src")))
-                 (=
-                   (set
-                     (doall
-                       (map #(st/replace % #".c" ".o")
-                         (.list (File. "src")))))
-                   (set (.list (File. "obj")))))
+                 ;(=
+                 ;  (set
+                 ;    (doall
+                 ;      (map #(st/replace % #".c" ".o")
+                 ;        (.list (File. "src")))))
+                 ;  (set (.list (File. "obj")))))
              nil        
              (do
                (println "building...")
-               (loop [sc (vec (. (File. (:src-path rc)) list))]
+               (loop [sc (vec 
+                           (remove 
+                             #(and
+                               (not (= (seq ".c") (take-last 2 %)))
+                               (not (= (seq ".cpp") (take-last 4 %))))
+                             (. (File. (:src-path rc)) list)))]
+                 ; ソースコードが存在するか
                  (if (= [] sc)
                    nil
                   (do
                     ; 既に更新済みかつオブジェクトが存在するか.
-                    (if (and
+                    (if ;(and
                           (= 
                             ((keyword (first sc)) @timestamp)
                             (.lastModified (File. (str "src/" (first sc)))))
-                          (some #(= (st/replace (first sc) #".c" ".o") %)
-                            (.list (File. "obj"))))
+                          ;(some #(= (st/replace (first sc) #".c" ".o") %)
+                          ;  (.list (File. "obj"))))
                       (println (first sc) "skip.")
                       ; コンパイル＆タイムスタンプ更新
                       (do
@@ -181,14 +193,19 @@
                             (str (:src-path rc) "/" (first sc))
                             (:lib-path rc)
                             (:inc-path rc))]
-                        (if (= (:exit result) 0)
-                          (println "done!")
-                          (do
-                            (println (:out result))
-                            (System/exit 0))))))
+                          (if (= (:exit result) 0)
+                            (println "done!")
+                            (do
+                              (println "failure!")
+                              (println (:err result)))))
+                        (dosync
+                          (alter timestamp merge 
+                            {(keyword (first sc))
+                             (.lastModified (File. (str "src/" (first sc))))}))))
                     (recur (drop 1 sc)))))
                (print "linking...")
                (flush)
+               ; アセンブリ
                (let [result
                  (gen-link-gcc 
                    (:compiler rc)
@@ -199,6 +216,6 @@
                  (if (= (:exit result) 0)
                    (println "done!")
                    (do
-                     (println (:out result))
-                     (System/exit 0))))
+                     (println "failure!")
+                     (println (:err result)))))
                (spit ".tmp" @timestamp))))))))
