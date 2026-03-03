@@ -10,3 +10,9 @@
 (deftest payload-from-cli-ignores-empty-args
   (is (nil? (core/payload-from-cli
              ["codex" "notification"]))))
+
+(deftest payload-from-cli-codex-notify-format
+  (let [json-payload "{\"type\":\"agent-turn-complete\"}"
+        args ["codex" json-payload]]
+    (is (nil? (core/payload-from-cli args))
+        "JSON in event-type position should not be extracted as payload")))

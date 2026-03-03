@@ -47,9 +47,9 @@ ceeker hook claude Notification <<< '{"session_id":"abc","title":"Working..."}'
 # もしくは引数で JSON を渡す
 ceeker hook claude Notification '{"session_id":"abc","title":"Working..."}'
 
-# Codex hookイベントを処理
-ceeker hook codex notification <<< '{"session_id":"xyz","message":"Testing..."}'
-# もしくは引数で JSON を渡す
+# Codex notify hookイベントを処理（Codex が JSON を最後の引数として渡す）
+ceeker hook codex '{"type":"agent-turn-complete","thread-id":"xyz","cwd":"/tmp","last-assistant-message":"Done."}'
+# レガシー形式も引き続きサポート
 ceeker hook codex notification '{"session_id":"xyz","message":"Testing..."}'
 ```
 
@@ -83,9 +83,10 @@ ceeker hook codex notification '{"session_id":"xyz","message":"Testing..."}'
 `~/.codex/config.toml` に以下を追加:
 
 ```toml
-[hooks]
-notify = "ceeker hook codex notification"
+notify = ["ceeker", "hook", "codex"]
 ```
+
+Codex は `notify` コマンドの最後の引数として JSON ペイロードを追加します（stdin ではなく argv 経由）。
 
 ## State Store
 
