@@ -99,7 +99,7 @@
      :fs (f/set-search-query filter-state search-buf)}
     (= key :escape)
     {:sm? false :sb nil :fs filter-state}
-    (or (= key (char 127)) (= key (char 8)))
+    (or (= key \u007f) (= key \backspace))
     {:sm? true :fs filter-state
      :sb (when (seq search-buf)
            (subs search-buf
