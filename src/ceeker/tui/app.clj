@@ -1,12 +1,23 @@
 (ns ceeker.tui.app
   "TUI application main loop."
   (:require [ceeker.state.store :as store]
+            [ceeker.tmux.pane :as pane]
             [ceeker.tui.filter :as f]
             [ceeker.tui.input :as input]
             [ceeker.tui.view :as view]
             [ceeker.tui.watcher :as watcher]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
+
+(def ^:private check-interval
+  "Pane liveness check interval in ticks (~1s each)."
+  10)
+
+(defn- maybe-check-panes!
+  "Runs pane liveness check when tick is due."
+  [tick state-dir]
+  (when (zero? (mod tick check-interval))
+    (pane/close-stale-sessions! state-dir)))
 
 (defn- get-session-list
   "Gets session list from state store."
@@ -64,6 +75,30 @@
   [value min-val max-val]
   (max min-val (min value max-val)))
 
+(defn- get-terminal-width
+  "Gets the current terminal width from a JLine terminal."
+  [^org.jline.terminal.Terminal terminal]
+  (let [w (.getWidth terminal)]
+    (if (pos? w) w 120)))
+
+(defn- next-display-mode
+  "Cycles display mode: :auto -> :table -> :card -> :auto."
+  [current]
+  (case current
+    :auto :table
+    :table :card
+    :card :auto
+    :auto))
+
+(defn- display-mode-label
+  "Returns display label for the current mode."
+  [mode]
+  (case mode
+    :auto "Auto"
+    :table "Table"
+    :card "Card"
+    "Auto"))
+
 (defn- filtered-sorted
   "Applies filters then sorts sessions."
   [sessions filter-state]
@@ -75,8 +110,8 @@
 
 (defn- render-screen
   "Renders the screen with sessions and message."
-  [sessions sel filt sm? sb msg]
-  (str (view/render sessions sel filt sm? sb)
+  [sessions sel filt sm? sb msg width dm]
+  (str (view/render sessions sel filt sm? sb width dm)
        (when msg (str "\n" msg))))
 
 (defn- handle-enter-key
@@ -112,48 +147,53 @@
 
 (defn- nav-key-result
   "Handles navigation and action keys."
-  [key sel max-idx visible fs]
+  [key sel max-idx visible fs dm]
   (cond
     (= key \q) {:quit true}
     (or (= key :up) (= key \k))
-    {:sel (max 0 (dec sel)) :fs fs}
+    {:sel (max 0 (dec sel)) :fs fs :dm dm}
     (or (= key :down) (= key \j))
-    {:sel (min max-idx (inc sel)) :fs fs}
+    {:sel (min max-idx (inc sel)) :fs fs :dm dm}
     (= key :enter)
-    {:sel sel :fs fs
+    {:sel sel :fs fs :dm dm
      :msg (handle-enter-key visible sel)}
     (= key \r)
-    {:sel sel :fs fs
+    {:sel sel :fs fs :dm dm
      :msg (view/render-message "Refreshed")}
+    (= key \v)
+    (let [new-dm (next-display-mode dm)]
+      {:sel sel :fs fs :dm new-dm
+       :msg (view/render-message
+             (str "View: " (display-mode-label new-dm)))})
     :else nil))
 
 (defn- filter-key-result
   "Handles filter toggle keys."
-  [key fs]
+  [key fs dm]
   (case key
-    \a {:sel 0 :fs (f/toggle-agent-filter fs)}
-    \s {:sel 0 :fs (f/toggle-status-filter fs)}
-    \/ {:sm? true :sb "" :fs fs}
-    \c {:sel 0 :fs (f/clear-filters fs)}
+    \a {:sel 0 :fs (f/toggle-agent-filter fs) :dm dm}
+    \s {:sel 0 :fs (f/toggle-status-filter fs) :dm dm}
+    \/ {:sm? true :sb "" :fs fs :dm dm}
+    \c {:sel 0 :fs (f/clear-filters fs) :dm dm}
     nil))
 
 (defn- handle-normal-key
   "Processes a key in normal mode."
-  [key sel max-idx visible fs]
-  (or (nav-key-result key sel max-idx visible fs)
-      (filter-key-result key fs)
-      {:sel sel :fs fs}))
+  [key sel max-idx visible fs dm]
+  (or (nav-key-result key sel max-idx visible fs dm)
+      (filter-key-result key fs dm)
+      {:sel sel :fs fs :dm dm}))
 
 (defn- process-key
   "Dispatches key to appropriate handler."
-  [key clamped sm? sb visible max-idx fs]
+  [key clamped sm? sb visible max-idx fs dm]
   (cond
     (nil? key) {:idle true}
     sm? (let [r (handle-search-key key sb fs)]
-          {:sel 0 :fs (:fs r)
+          {:sel 0 :fs (:fs r) :dm dm
            :sm? (:sm? r) :sb (:sb r)})
     :else (handle-normal-key
-           key clamped max-idx visible fs)))
+           key clamped max-idx visible fs dm)))
 
 (defn- wait-for-input
   "Waits for key or file change, returns key or nil."
@@ -176,24 +216,28 @@
   "Main TUI render-input loop."
   [terminal w state-dir]
   (loop [sel 0 msg nil fs f/empty-filter
-         sm? false sb nil]
+         sm? false sb nil dm :auto tick 0]
+    (maybe-check-panes! tick state-dir)
     (let [sessions (get-session-list state-dir)
           visible (filtered-sorted sessions fs)
           mx (max 0 (dec (count visible)))
           cl (clamp sel 0 mx)
-          scr (render-screen sessions cl fs sm? sb msg)]
+          width (get-terminal-width terminal)
+          scr (render-screen sessions cl fs sm? sb msg
+                             width dm)]
       (print scr)
       (flush)
       (let [r (process-key
                (wait-for-input terminal w)
-               cl sm? sb visible mx fs)]
+               cl sm? sb visible mx fs dm)]
         (cond
           (:idle r)
-          (recur cl nil fs sm? sb)
+          (recur cl nil fs sm? sb dm (inc tick))
           (nil? (:fs r)) nil
           :else
           (recur (get r :sel cl) (:msg r) (:fs r)
-                 (get r :sm? false) (:sb r)))))))
+                 (get r :sm? false) (:sb r)
+                 (get r :dm :auto) (inc tick)))))))
 
 (defn start-tui!
   "Runs the TUI application loop."

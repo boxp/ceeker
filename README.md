@@ -46,6 +46,7 @@ ceeker
 | `s` | ステータスフィルタ切替（全て → running → completed → error → waiting → idle → 全て） |
 | `/` | テキスト検索（session-id / cwd 部分一致） |
 | `c` | フィルタ全クリア |
+| `v` | 表示切替 (Auto→Table→Card) |
 | `q` | 終了 |
 
 ### Hook CLI
@@ -99,6 +100,38 @@ notify = ["ceeker", "hook", "codex"]
 ```
 
 Codex は `notify` コマンドの最後の引数として JSON ペイロードを追加します（stdin ではなく argv 経由）。
+
+### セッション自動整理
+
+tmux paneが閉じられたセッションは自動的に `Closed` 状態に遷移します。
+
+- **チェックタイミング**: TUI起動時、約10秒ごとの定期チェック、hookイベント受信時
+- **仕組み**: `tmux list-panes -a` を1回実行し、セッションのcwdとpaneのcwdをマッチング
+- **更新**: ファイルロック下でアトミックに状態更新
+
+### 縦長ペイン時の表示仕様
+
+画面幅に応じて表示を自動切替します。`v` キーで手動切替も可能です。
+
+| モード | 動作 |
+|--------|------|
+| Auto | 幅80列未満でカード表示、80列以上でテーブル表示 |
+| Table | 常にテーブル表示 |
+| Card | 常にカード表示 |
+
+**カード表示例:**
+```
+  ┌ abc123 [Claude] ● Running
+  │ 12:00:00  project
+  │ Working on feature...
+  └─
+```
+
+**テーブル表示例:**
+```
+   SESSION      AGENT     STATUS      WORKTREE     MESSAGE                                  UPDATED
+   abc123       [Claude]  ● Running   project      Working on feature...                    12:00:00
+```
 
 ## State Store
 

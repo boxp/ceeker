@@ -159,3 +159,45 @@
    (let [path (state-file-path dir)]
      (with-file-lock dir
        #(write-state-file! path {:sessions {}})))))
+
+(defn- stale-running?
+  "Returns true if session is running with a cwd
+   not present in pane-cwds."
+  [session pane-cwds]
+  (and (= :running (:agent-status session))
+       (seq (:cwd session))
+       (not (contains? pane-cwds (:cwd session)))))
+
+(defn- mark-stale-sessions
+  "Returns updated sessions map with stale ones closed."
+  [sessions pane-cwds now]
+  (reduce-kv
+   (fn [m sid session]
+     (assoc m sid
+            (if (stale-running? session pane-cwds)
+              (merge session
+                     {:agent-status :closed
+                      :last-message "pane closed"
+                      :last-updated now})
+              session)))
+   {}
+   sessions))
+
+(defn close-stale-sessions!
+  "Marks running sessions as :closed when their cwd
+   is not in pane-cwds set. Atomic under file lock."
+  ([pane-cwds]
+   (close-stale-sessions! (state-dir) pane-cwds))
+  ([dir pane-cwds]
+   (ensure-state-dir! dir)
+   (let [path (state-file-path dir)
+         now (.toString (java.time.Instant/now))]
+     (with-file-lock dir
+       (fn []
+         (let [state (read-state-file path)
+               updated (mark-stale-sessions
+                        (:sessions state)
+                        pane-cwds now)]
+           (write-state-file!
+            path
+            {:sessions updated})))))))
