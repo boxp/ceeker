@@ -27,7 +27,7 @@
 (deftest test-empty-filter
   (testing "empty filter passes all sessions"
     (let [result (f/apply-filters f/empty-filter
-                                 sample-sessions)]
+                                  sample-sessions)]
       (is (= 4 (count result))))))
 
 (deftest test-agent-filter

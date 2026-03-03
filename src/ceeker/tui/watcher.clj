@@ -30,14 +30,15 @@
     (try
       (let [ws (:watch-service watcher)
             key (.poll ws timeout-ms TimeUnit/MILLISECONDS)]
-        (when key
+        (if key
           (let [changed? (some
                           (fn [evt]
-                            (let [fname (str (.context evt))]
-                              (= fname "sessions.edn")))
+                            (= (str (.context evt))
+                               "sessions.edn"))
                           (.pollEvents key))]
             (.reset key)
-            (boolean changed?))))
+            (boolean changed?))
+          false))
       (catch Exception _
         false))))
 
