@@ -12,6 +12,10 @@
 (def ^:private ansi-cyan "\033[36m")
 (def ^:private ansi-blue "\033[34m")
 
+(def ^:const compact-threshold
+  "Terminal width below which compact card view is used."
+  80)
+
 (defn- clear-screen
   "Returns ANSI escape to clear screen and move cursor to top."
   []
@@ -73,20 +77,46 @@
                  (format-time (:last-updated session)))
          suffix)))
 
+(defn- format-session-card
+  "Formats a single session as a compact card for narrow terminals."
+  [session selected? _index width]
+  (let [content-width (max 10 (- width 4))
+        sel-start (if selected? ansi-reverse "")
+        sel-end (if selected? ansi-reset "")
+        line1 (str sel-start
+                   "  \u250c " (truncate (:session-id session) 12)
+                   " " (agent-badge (:agent-type session))
+                   (when selected? ansi-reverse)
+                   " " (status-badge (:agent-status session))
+                   (when selected? ansi-reverse)
+                   sel-end)
+        line2 (str sel-start
+                   "  \u2502 " (format-time (:last-updated session))
+                   "  " (or (cwd-short-name (:cwd session)) "")
+                   sel-end)
+        line3 (str sel-start
+                   "  \u2502 "
+                   (truncate (:last-message session) content-width)
+                   sel-end)
+        line4 (str sel-start
+                   "  \u2514\u2500"
+                   sel-end)]
+    (str/join "\n" [line1 line2 line3 line4])))
+
 (defn- header-line
   "Returns the header line."
   [session-count]
   (str ansi-bold
-       (format "  ceeker — %d session(s)" session-count)
+       (format "  ceeker \u2014 %d session(s)" session-count)
        ansi-reset))
 
 (defn- separator-line
   "Returns a separator line."
-  []
-  (str ansi-dim
-       "  ──────────────────────────────────────"
-       "──────────────────────────────────────"
-       ansi-reset))
+  [width]
+  (let [bar-len (max 20 (- width 4))]
+    (str ansi-dim
+         "  " (apply str (repeat bar-len "\u2500"))
+         ansi-reset)))
 
 (defn- column-headers
   "Returns column header line."
@@ -99,32 +129,61 @@
 
 (defn- footer-line
   "Returns the footer help line."
-  []
+  [display-mode]
   (str ansi-dim
        "  [j/k] Navigate  [Enter] Jump to tmux  "
-       "[r] Refresh  [q] Quit"
+       "[r] Refresh  [v] View:"
+       (case display-mode
+         :auto "Auto"
+         :table "Table"
+         :card "Card"
+         "Auto")
+       "  [q] Quit"
        ansi-reset))
 
+(defn- use-compact?
+  "Determines if compact card view should be used."
+  [display-mode width]
+  (case display-mode
+    :table false
+    :card true
+    (< width compact-threshold)))
+
 (defn render
-  "Renders the full TUI screen. Returns the string to print."
-  [sessions selected-index]
-  (let [sorted (sort-by
-                (fn [s]
-                  [(if (= :running (:agent-status s)) 0 1)
-                   (or (:last-updated s) "")])
-                sessions)
-        lines (concat
-               [(clear-screen)
-                (header-line (count sessions))
-                (separator-line)
-                (column-headers)
-                (separator-line)]
-               (map-indexed
-                (fn [i s]
-                  (format-session-line s (= i selected-index) i))
-                sorted)
-               [(separator-line) (footer-line)])]
-    (str/join "\n" lines)))
+  "Renders the full TUI screen. Returns the string to print.
+   Supports both table and compact card layouts based on terminal width
+   and display-mode (:auto, :table, :card)."
+  ([sessions selected-index]
+   (render sessions selected-index 120 :auto))
+  ([sessions selected-index terminal-width display-mode]
+   (let [width (or terminal-width 120)
+         compact? (use-compact? display-mode width)
+         sorted (sort-by
+                 (fn [s]
+                   [(if (= :running (:agent-status s)) 0 1)
+                    (or (:last-updated s) "")])
+                 sessions)
+         lines (concat
+                [(clear-screen)
+                 (header-line (count sessions))
+                 (separator-line width)]
+                (if compact?
+                  (mapcat
+                   (fn [i s]
+                     [(format-session-card
+                       s (= i selected-index) i width)])
+                   (range)
+                   sorted)
+                  (concat
+                   [(column-headers)
+                    (separator-line width)]
+                   (map-indexed
+                    (fn [i s]
+                      (format-session-line s (= i selected-index) i))
+                    sorted)))
+                [(separator-line width)
+                 (footer-line display-mode)])]
+     (str/join "\n" lines))))
 
 (defn render-error
   "Renders an error message at the bottom of screen."

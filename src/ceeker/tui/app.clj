@@ -70,10 +70,34 @@
       (or (:last-updated s) "")])
    sessions))
 
+(defn- get-terminal-width
+  "Gets the current terminal width from a JLine terminal."
+  [^org.jline.terminal.Terminal terminal]
+  (let [w (.getWidth terminal)]
+    (if (pos? w) w 120)))
+
+(defn- next-display-mode
+  "Cycles display mode: :auto -> :table -> :card -> :auto."
+  [current]
+  (case current
+    :auto :table
+    :table :card
+    :card :auto
+    :auto))
+
+(defn- display-mode-label
+  "Returns display label for the current mode."
+  [mode]
+  (case mode
+    :auto "Auto"
+    :table "Table"
+    :card "Card"
+    "Auto"))
+
 (defn- render-screen
   "Renders the screen with sessions and optional message."
-  [sorted-sessions selected message]
-  (str (view/render sorted-sessions selected)
+  [sorted-sessions selected message terminal-width display-mode]
+  (str (view/render sorted-sessions selected terminal-width display-mode)
        (when message (str "\n" message))))
 
 (defn- handle-enter-key
@@ -89,19 +113,26 @@
         (view/render-error (:error result))))))
 
 (defn- handle-key-input
-  "Processes a key and returns [new-selected new-message] or nil to quit."
-  [key selected max-idx sorted-sessions]
+  "Processes a key and returns [new-selected new-message new-display-mode]
+   or nil to quit."
+  [key selected max-idx sorted-sessions display-mode]
   (cond
     (= key \q) nil
     (or (= key :up) (= key \k))
-    [(max 0 (dec selected)) nil]
+    [(max 0 (dec selected)) nil display-mode]
     (or (= key :down) (= key \j))
-    [(min max-idx (inc selected)) nil]
+    [(min max-idx (inc selected)) nil display-mode]
     (= key :enter)
-    [selected (handle-enter-key sorted-sessions selected)]
+    [selected (handle-enter-key sorted-sessions selected) display-mode]
     (= key \r)
-    [selected (view/render-message "Refreshed")]
-    :else [selected nil]))
+    [selected (view/render-message "Refreshed") display-mode]
+    (= key \v)
+    (let [new-mode (next-display-mode display-mode)]
+      [selected
+       (view/render-message
+        (str "View: " (display-mode-label new-mode)))
+       new-mode])
+    :else [selected nil display-mode]))
 
 (defn start-tui!
   "Runs the TUI application loop."
@@ -109,19 +140,23 @@
   ([state-dir]
    (let [terminal (input/create-terminal)]
      (try
-       (loop [selected 0, message nil]
+       (loop [selected 0, message nil, display-mode :auto]
          (let [sessions (get-session-list state-dir)
                max-idx (max 0 (dec (count sessions)))
                selected (clamp selected 0 max-idx)
                sorted (sort-sessions sessions)
-               screen (render-screen sorted selected message)]
+               width (get-terminal-width terminal)
+               screen (render-screen
+                       sorted selected message width display-mode)]
            (print screen)
            (flush)
            (let [key (input/read-key terminal 1000)
                  result (handle-key-input
-                         key selected max-idx sorted)]
+                         key selected max-idx sorted display-mode)]
              (when result
-               (recur (first result) (second result))))))
+               (recur (first result)
+                      (second result)
+                      (nth result 2))))))
        (finally
          (print "\033[2J\033[H")
          (flush)

@@ -37,6 +37,7 @@ ceeker
 | `k` / `↑` | 上へ移動 |
 | `Enter` | 選択セッションのtmuxペインへジャンプ |
 | `r` | 手動リフレッシュ |
+| `v` | 表示切替 (Auto→Table→Card) |
 | `q` | 終了 |
 
 ### Hook CLI
@@ -87,6 +88,50 @@ notify = ["ceeker", "hook", "codex"]
 ```
 
 Codex は `notify` コマンドの最後の引数として JSON ペイロードを追加します（stdin ではなく argv 経由）。
+
+## 縦長ペイン時の表示仕様
+
+ターミナル幅が80カラム未満の場合、自動的にコンパクトカード表示に切り替わります。
+
+### 表示モード
+
+| モード | 説明 |
+|--------|------|
+| Auto | 幅80未満でカード、80以上でテーブル（デフォルト） |
+| Table | 常にテーブル表示 |
+| Card | 常にカード表示 |
+
+`v` キーで Auto → Table → Card の順に切り替え可能です。
+
+### カード表示例
+
+```
+  ceeker — 2 session(s)
+  ────────────────────────────────
+  ┌ abc123 [Claude] ● Running
+  │ 12:34:56  my-project
+  │ Working on feature...
+  └─
+  ┌ xyz789 [Codex] ○ Done
+  │ 12:30:00  backend
+  │ Completed refactoring
+  └─
+  ────────────────────────────────
+  [j/k] Navigate  [Enter] Jump to tmux  [r] Refresh  [v] View:Auto  [q] Quit
+```
+
+### テーブル表示例（通常幅）
+
+```
+  ceeker — 2 session(s)
+  ──────────────────────────────────────────────────────────────────────────────
+   SESSION      AGENT     STATUS      WORKTREE     MESSAGE                                  UPDATED
+  ──────────────────────────────────────────────────────────────────────────────
+   abc123       [Claude]  ● Running   my-project   Working on feature...                    12:34:56
+   xyz789       [Codex]   ○ Done      backend      Completed refactoring                    12:30:00
+  ──────────────────────────────────────────────────────────────────────────────
+  [j/k] Navigate  [Enter] Jump to tmux  [r] Refresh  [v] View:Auto  [q] Quit
+```
 
 ## State Store
 
