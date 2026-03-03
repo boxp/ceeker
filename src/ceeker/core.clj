@@ -18,11 +18,10 @@
     ""
     "Usage:"
     "  ceeker              Start the TUI"
-    "  ceeker hook <agent> <event> [<payload>]"
+    "  ceeker hook <agent> <event>"
     "                      Handle a hook event"
     "                      agent: claude | codex"
     "                      event: Notification | Stop | etc."
-    "                      payload: JSON string (optional, falls back to STDIN)"
     ""
     "Options:"
     summary]))
@@ -35,15 +34,6 @@
     (catch Exception _
       "")))
 
-(defn payload-from-cli
-  "Returns the optional JSON payload provided as CLI arguments after agent/event." 
-  [args]
-  (let [payload-args (drop 2 args)
-        joined (when (seq payload-args)
-                 (str/join " " payload-args))]
-    (when (and joined (seq (str/trim joined)))
-      joined)))
-
 (defn- handle-hook-command
   "Handles the 'hook' subcommand."
   [args]
@@ -55,10 +45,7 @@
         (println "  agent: claude | codex")
         (println "  event: Notification | Stop | etc."))
       (System/exit 1))
-    (let [payload-arg (payload-from-cli args)
-          stdin (if payload-arg
-                  payload-arg
-                  (read-stdin))
+    (let [stdin (read-stdin)
           result (hook/handle-hook! agent-type event-type stdin)]
       (binding [*out* *err*]
         (println (str "ceeker: recorded "
