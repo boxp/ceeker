@@ -20,9 +20,9 @@
     "  ceeker              Start the TUI"
     "  ceeker hook <agent> <event> [<payload>]"
     "                      Handle a hook event"
+    "  ceeker hook <agent> <json-payload>"
+    "                      Handle a Codex notify event"
     "                      agent: claude | codex"
-    "                      event: Notification | Stop | etc."
-    "                      payload: JSON string (optional, falls back to STDIN)"
     ""
     "Options:"
     summary]))
@@ -44,26 +44,41 @@
     (when (and joined (seq (str/trim joined)))
       joined)))
 
+(defn- json-string?
+  "Returns true if s looks like a JSON object string."
+  [s]
+  (and (string? s)
+       (str/starts-with? (str/trim s) "{")))
+
+(defn- resolve-hook-args
+  "Resolves event-type and payload from CLI args."
+  [args raw-second]
+  (let [json-arg? (json-string? raw-second)]
+    {:event-type (when-not json-arg? raw-second)
+     :payload (or (if json-arg?
+                    raw-second
+                    (payload-from-cli args))
+                  (read-stdin))}))
+
 (defn- handle-hook-command
   "Handles the 'hook' subcommand."
   [args]
   (let [agent-type (first args)
-        event-type (second args)]
-    (when (or (nil? agent-type) (nil? event-type))
+        raw-second (second args)]
+    (when (or (nil? agent-type) (nil? raw-second))
       (binding [*out* *err*]
         (println "Usage: ceeker hook <agent> <event>")
-        (println "  agent: claude | codex")
-        (println "  event: Notification | Stop | etc."))
+        (println "  agent: claude | codex"))
       (System/exit 1))
-    (let [payload-arg (payload-from-cli args)
-          stdin (if payload-arg
-                  payload-arg
-                  (read-stdin))
-          result (hook/handle-hook! agent-type event-type stdin)]
+    (let [{:keys [event-type payload]}
+          (resolve-hook-args args raw-second)
+          result (hook/handle-hook!
+                  agent-type event-type payload)]
       (binding [*out* *err*]
         (println (str "ceeker: recorded "
                       (:agent-type result) " "
-                      event-type " for "
+                      (or event-type "notify")
+                      " for "
                       (:session-id result)))))))
 
 (defn -main

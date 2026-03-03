@@ -34,7 +34,7 @@
         ch (.read reader (long timeout-ms))]
     (cond
       (or (= ch -1) (= ch -2)) nil
-      (= ch 27) (read-escape-seq reader)
+      (= ch 27) (or (read-escape-seq reader) :escape)
       (or (= ch 13) (= ch 10)) :enter
       :else (char ch))))
 
