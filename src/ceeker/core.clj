@@ -36,7 +36,7 @@
       "")))
 
 (defn payload-from-cli
-  "Returns the optional JSON payload provided as CLI arguments after agent/event." 
+  "Returns the optional JSON payload provided as CLI arguments after agent/event."
   [args]
   (let [payload-args (drop 2 args)
         joined (when (seq payload-args)
