@@ -9,9 +9,7 @@
            [java.nio.file.attribute PosixFilePermissions]))
 
 (defn state-dir
-  "Returns the state directory path.
-   Uses XDG_RUNTIME_DIR/ceeker if available,
-   falls back to /tmp/ceeker-<uid>/."
+  "Returns the state directory path."
   []
   (let [xdg (System/getenv "XDG_RUNTIME_DIR")
         uid (System/getProperty "user.name")]
@@ -24,52 +22,66 @@
   ([] (state-file-path (state-dir)))
   ([dir] (str dir "/sessions.edn")))
 
-(defn- validate-state-dir!
-  "Validates that the state directory is safe to use.
-   Rejects symlinks, non-directories, and dirs owned by others."
+(defn- reject-symlink!
+  "Throws if the path is a symbolic link."
   [^File f]
-  (let [path (.toPath f)]
-    (when (Files/isSymbolicLink path)
-      (throw (ex-info "State directory is a symlink (rejected)"
-                      {:path (.getAbsolutePath f)})))
-    (when (.exists f)
-      (when-not (.isDirectory f)
-        (throw (ex-info "State path exists but is not a directory"
-                        {:path (.getAbsolutePath f)})))
-      (try
-        (let [owner (-> (Files/getOwner path (make-array
-                                              java.nio.file.LinkOption
-                                              0))
-                        (.getName))
-              current-user (System/getProperty "user.name")]
-          (when (and owner current-user
-                     (not= owner current-user))
-            (throw
-             (ex-info "State directory owned by another user"
-                      {:path (.getAbsolutePath f)
-                       :owner owner
-                       :expected current-user}))))
-        (catch UnsupportedOperationException _ nil)))))
+  (when (Files/isSymbolicLink (.toPath f))
+    (throw (ex-info "State directory is a symlink (rejected)"
+                    {:path (.getAbsolutePath f)}))))
+
+(defn- reject-non-directory!
+  "Throws if the path exists but is not a directory."
+  [^File f]
+  (when (and (.exists f) (not (.isDirectory f)))
+    (throw (ex-info "State path exists but is not a directory"
+                    {:path (.getAbsolutePath f)}))))
+
+(defn- validate-owner!
+  "Throws if the directory is owned by another user."
+  [^File f]
+  (try
+    (let [owner (-> (Files/getOwner
+                     (.toPath f)
+                     (make-array java.nio.file.LinkOption 0))
+                    (.getName))
+          current (System/getProperty "user.name")]
+      (when (and owner current (not= owner current))
+        (throw
+         (ex-info "State directory owned by another user"
+                  {:path (.getAbsolutePath f)
+                   :owner owner
+                   :expected current}))))
+    (catch UnsupportedOperationException _ nil)))
+
+(defn- validate-state-dir!
+  "Validates that the state directory is safe to use."
+  [^File f]
+  (reject-symlink! f)
+  (when (.exists f)
+    (reject-non-directory! f)
+    (validate-owner! f)))
+
+(defn- create-state-dir!
+  "Creates the state directory with secure permissions."
+  [^File f]
+  (.mkdirs f)
+  (try
+    (Files/setPosixFilePermissions
+     (.toPath f)
+     (PosixFilePermissions/fromString "rwx------"))
+    (catch UnsupportedOperationException _ nil)))
 
 (defn ensure-state-dir!
-  "Creates the state directory if it doesn't exist.
-   Validates safety (rejects symlinks)."
+  "Creates the state directory if it doesn't exist."
   ([] (ensure-state-dir! (state-dir)))
   ([dir]
    (let [f (io/file dir)]
      (if (.exists f)
        (validate-state-dir! f)
-       (do
-         (.mkdirs f)
-         (try
-           (Files/setPosixFilePermissions
-            (.toPath f)
-            (PosixFilePermissions/fromString "rwx------"))
-           (catch UnsupportedOperationException _ nil)))))))
+       (create-state-dir! f)))))
 
 (defn- read-state-file
-  "Reads and parses the sessions.edn file.
-   Returns empty map if file doesn't exist or is empty."
+  "Reads and parses the sessions.edn file."
   [path]
   (let [f (io/file path)]
     (if (and (.exists f) (pos? (.length f)))
@@ -82,8 +94,7 @@
   (spit path (pr-str state)))
 
 (defn with-file-lock
-  "Executes f while holding an exclusive file lock on the state file.
-   Creates lock file alongside the state file."
+  "Executes f while holding an exclusive file lock."
   [dir f]
   (let [lock-path (str dir "/sessions.lock")
         _ (ensure-state-dir! dir)
@@ -109,8 +120,7 @@
        #(read-state-file path)))))
 
 (defn update-session!
-  "Updates a session in the state store.
-   session-id is the key, session-data is merged into existing data."
+  "Updates a session in the state store."
   ([session-id session-data]
    (update-session! (state-dir) session-id session-data))
   ([dir session-id session-data]
@@ -119,11 +129,13 @@
      (with-file-lock dir
        (fn []
          (let [state (read-state-file path)
-               existing (get-in state [:sessions session-id] {})
+               existing (get-in state
+                                [:sessions session-id] {})
                updated (merge existing session-data)]
            (write-state-file!
             path
-            (assoc-in state [:sessions session-id] updated))))))))
+            (assoc-in state
+                      [:sessions session-id] updated))))))))
 
 (defn remove-session!
   "Removes a session from the state store."

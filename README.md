@@ -6,15 +6,17 @@ AI Coding Agent セッション・進捗モニタリングTUI。
 
 ## 前提条件
 
-- Java 21+
-- [Clojure CLI](https://clojure.org/guides/install_clojure) 1.12+
 - tmux
 
-## セットアップ
+## インストール
+
+[Releases](https://github.com/boxp/ceeker/releases) からプラットフォームに合ったバイナリをダウンロード:
 
 ```bash
-git clone https://github.com/boxp/ceeker.git
-cd ceeker
+# 例: Linux amd64
+curl -L -o ceeker https://github.com/boxp/ceeker/releases/latest/download/ceeker-linux-amd64
+chmod +x ceeker
+sudo mv ceeker /usr/local/bin/
 ```
 
 ## 使い方
@@ -22,7 +24,7 @@ cd ceeker
 ### TUI起動
 
 ```bash
-clojure -M:run
+ceeker
 ```
 
 セッション一覧が表示されます。
@@ -59,13 +61,13 @@ ceeker hook codex notification <<< '{"session_id":"xyz","message":"Testing..."}'
     "Notification": [
       {
         "type": "command",
-        "command": "clojure -M:run hook claude Notification"
+        "command": "ceeker hook claude Notification"
       }
     ],
     "Stop": [
       {
         "type": "command",
-        "command": "clojure -M:run hook claude Stop"
+        "command": "ceeker hook claude Stop"
       }
     ]
   }
@@ -78,7 +80,7 @@ ceeker hook codex notification <<< '{"session_id":"xyz","message":"Testing..."}'
 
 ```toml
 [hooks]
-notify = "clojure -M:run hook codex notification"
+notify = "ceeker hook codex notification"
 ```
 
 ## State Store
@@ -90,7 +92,16 @@ notify = "clojure -M:run hook codex notification"
 
 ## 開発
 
+### 前提条件（開発者向け）
+
+- Java 21+
+- [Clojure CLI](https://clojure.org/guides/install_clojure) 1.12+
+- [GraalVM](https://www.graalvm.org/) (native image build用)
+
 ```bash
+git clone https://github.com/boxp/ceeker.git
+cd ceeker
+
 # テスト
 clojure -M:test
 
@@ -103,8 +114,8 @@ clojure -M:format-check
 # フォーマット修正
 clojure -M:format-fix
 
-# 全CI実行
-make ci
+# 開発時のTUI起動
+clojure -M:run
 ```
 
 ## ライセンス

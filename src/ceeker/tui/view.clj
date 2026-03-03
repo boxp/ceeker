@@ -43,32 +43,34 @@
     (str (subs s 0 (- max-len 1)) "…")
     (or s "")))
 
+(defn- format-time
+  "Formats a timestamp for display (HH:mm:ss portion)."
+  [updated]
+  (if (and updated (>= (count (str updated)) 19))
+    (subs (str updated) 11 19)
+    (or updated "")))
+
+(defn- cwd-short-name
+  "Extracts the last path component from a cwd path."
+  [cwd]
+  (when (seq cwd)
+    (last (str/split cwd #"/"))))
+
 (defn- format-session-line
   "Formats a single session line for display."
   [session selected? _index]
   (let [prefix (if selected?
                  (str ansi-reverse " > " ansi-reset ansi-reverse)
                  "   ")
-        suffix (if selected? ansi-reset "")
-        sid (truncate (:session-id session) 12)
-        agent (agent-badge (:agent-type session))
-        status (status-badge (:agent-status session))
-        cwd-short (when-let [cwd (:cwd session)]
-                    (let [parts (str/split cwd #"/")]
-                      (last parts)))
-        msg (truncate (:last-message session) 40)
-        updated (:last-updated session)]
+        suffix (if selected? ansi-reset "")]
     (str prefix
          (format " %-12s %s %s %-12s %-40s %s"
-                 sid agent status
-                 (or cwd-short "")
-                 msg
-                 (or (when updated
-                       (let [s (str updated)]
-                         (if (>= (count s) 19)
-                           (subs s 11 19)
-                           s)))
-                     ""))
+                 (truncate (:session-id session) 12)
+                 (agent-badge (:agent-type session))
+                 (status-badge (:agent-status session))
+                 (or (cwd-short-name (:cwd session)) "")
+                 (truncate (:last-message session) 40)
+                 (format-time (:last-updated session)))
          suffix)))
 
 (defn- header-line
@@ -106,12 +108,11 @@
 (defn render
   "Renders the full TUI screen. Returns the string to print."
   [sessions selected-index]
-  (let [session-list (sort-by
-                      (fn [s]
-                        [(if (= :running (:agent-status s))
-                           0 1)
-                         (or (:last-updated s) "")])
-                      sessions)
+  (let [sorted (sort-by
+                (fn [s]
+                  [(if (= :running (:agent-status s)) 0 1)
+                   (or (:last-updated s) "")])
+                sessions)
         lines (concat
                [(clear-screen)
                 (header-line (count sessions))
@@ -119,12 +120,10 @@
                 (column-headers)
                 (separator-line)]
                (map-indexed
-                (fn [i session]
-                  (format-session-line
-                   session (= i selected-index) i))
-                session-list)
-               [(separator-line)
-                (footer-line)])]
+                (fn [i s]
+                  (format-session-line s (= i selected-index) i))
+                sorted)
+               [(separator-line) (footer-line)])]
     (str/join "\n" lines)))
 
 (defn render-error

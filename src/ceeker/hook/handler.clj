@@ -20,101 +20,77 @@
       (catch Exception _
         nil))))
 
+(defn- make-session
+  "Creates a normalized session state map."
+  [session-id agent-type status cwd message]
+  {:session-id session-id
+   :agent-type agent-type
+   :agent-status status
+   :cwd cwd
+   :last-message message
+   :last-updated (current-timestamp)})
+
+(defn- extract-claude-identity
+  "Extracts session-id and cwd from Claude payload."
+  [payload]
+  {:session-id (or (:session_id payload)
+                   (get-in payload [:session :session_id])
+                   (str (java.util.UUID/randomUUID)))
+   :cwd (or (:cwd payload)
+             (get-in payload [:session :cwd])
+             "")})
+
+(defn- claude-event-fields
+  "Returns [status message] for a Claude event type."
+  [event-type payload]
+  (case event-type
+    "Notification" [:running (or (:title payload)
+                                 (:message payload)
+                                 "notification")]
+    "Stop" [:completed "session ended"]
+    "SubagentStop" [:running "subagent completed"]
+    "PreToolUse" [:running (str "using: "
+                                (or (:tool_name payload) "tool"))]
+    "PostToolUse" [:running (str "used: "
+                                 (or (:tool_name payload) "tool"))]
+    [:running (str "event: " event-type)]))
+
 (defn- normalize-claude-event
   "Normalizes a Claude Code hook event into session state."
   [event-type payload]
-  (let [session-id (or (:session_id payload)
-                       (get-in payload [:session :session_id])
-                       (str (java.util.UUID/randomUUID)))
-        cwd (or (:cwd payload)
-                (get-in payload [:session :cwd])
-                "")]
-    (case event-type
-      "Notification"
-      {:session-id session-id
-       :agent-type :claude-code
-       :agent-status :running
-       :cwd cwd
-       :last-message (or (:title payload)
-                         (:message payload)
-                         "notification")
-       :last-updated (current-timestamp)}
+  (let [id (extract-claude-identity payload)
+        [status message] (claude-event-fields
+                          event-type payload)]
+    (make-session (:session-id id) :claude-code
+                  status (:cwd id) message)))
 
-      "Stop"
-      {:session-id session-id
-       :agent-type :claude-code
-       :agent-status :completed
-       :cwd cwd
-       :last-message "session ended"
-       :last-updated (current-timestamp)}
+(defn- extract-codex-identity
+  "Extracts session-id and cwd from Codex payload."
+  [payload]
+  {:session-id (or (:session_id payload)
+                   (str (java.util.UUID/randomUUID)))
+   :cwd (or (:cwd payload) "")})
 
-      "SubagentStop"
-      {:session-id session-id
-       :agent-type :claude-code
-       :agent-status :running
-       :cwd cwd
-       :last-message "subagent completed"
-       :last-updated (current-timestamp)}
-
-      "PreToolUse"
-      {:session-id session-id
-       :agent-type :claude-code
-       :agent-status :running
-       :cwd cwd
-       :last-message (str "using: "
-                          (or (:tool_name payload) "tool"))
-       :last-updated (current-timestamp)}
-
-      "PostToolUse"
-      {:session-id session-id
-       :agent-type :claude-code
-       :agent-status :running
-       :cwd cwd
-       :last-message (str "used: "
-                          (or (:tool_name payload) "tool"))
-       :last-updated (current-timestamp)}
-
-      ;; default
-      {:session-id session-id
-       :agent-type :claude-code
-       :agent-status :running
-       :cwd cwd
-       :last-message (str "event: " event-type)
-       :last-updated (current-timestamp)})))
+(defn- codex-event-fields
+  "Returns [status message] for a Codex event type."
+  [event-type payload]
+  (case event-type
+    "notification" [:running (or (:message payload)
+                                 "notification")]
+    "stop" [:completed "session ended"]
+    [:running (str "event: " event-type)]))
 
 (defn- normalize-codex-event
   "Normalizes a Codex hook event into session state."
   [event-type payload]
-  (let [session-id (or (:session_id payload)
-                       (str (java.util.UUID/randomUUID)))
-        cwd (or (:cwd payload) "")]
-    (case event-type
-      "notification"
-      {:session-id session-id
-       :agent-type :codex
-       :agent-status :running
-       :cwd cwd
-       :last-message (or (:message payload) "notification")
-       :last-updated (current-timestamp)}
-
-      "stop"
-      {:session-id session-id
-       :agent-type :codex
-       :agent-status :completed
-       :cwd cwd
-       :last-message "session ended"
-       :last-updated (current-timestamp)}
-
-      ;; default
-      {:session-id session-id
-       :agent-type :codex
-       :agent-status :running
-       :cwd cwd
-       :last-message (str "event: " event-type)
-       :last-updated (current-timestamp)})))
+  (let [id (extract-codex-identity payload)
+        [status message] (codex-event-fields
+                          event-type payload)]
+    (make-session (:session-id id) :codex
+                  status (:cwd id) message)))
 
 (defn normalize-event
-  "Normalizes a hook event based on agent type and event type."
+  "Normalizes a hook event based on agent type."
   [agent-type event-type payload]
   (case agent-type
     "claude" (normalize-claude-event event-type payload)
@@ -123,12 +99,13 @@
                     {:agent-type agent-type}))))
 
 (defn handle-hook!
-  "Handles a hook event: parses payload, normalizes, writes to store."
+  "Handles a hook event: parses, normalizes, writes to store."
   ([agent-type event-type stdin-input]
    (handle-hook! nil agent-type event-type stdin-input))
   ([state-dir agent-type event-type stdin-input]
    (let [payload (or (parse-hook-payload stdin-input) {})
-         session-data (normalize-event agent-type event-type payload)
+         session-data (normalize-event
+                       agent-type event-type payload)
          session-id (:session-id session-data)]
      (if state-dir
        (store/update-session! state-dir session-id session-data)

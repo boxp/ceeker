@@ -4,44 +4,39 @@
            [org.jline.utils NonBlockingReader]))
 
 (defn create-terminal
-  "Creates a JLine3 terminal in raw mode."
+  "Creates a JLine3 terminal and enters raw mode."
   []
-  (-> (TerminalBuilder/builder)
-      (.system true)
-      (.jansi false)
-      (.build)))
+  (let [terminal (-> (TerminalBuilder/builder)
+                     (.system true)
+                     (.jansi false)
+                     (.build))]
+    (.enterRawMode terminal)
+    terminal))
+
+(defn- read-escape-seq
+  "Reads an escape sequence from reader. Returns keyword or nil."
+  [^NonBlockingReader reader]
+  (let [ch2 (.read reader 50)]
+    (when (= ch2 91)
+      (case (.read reader 50)
+        65 :up
+        66 :down
+        67 :right
+        68 :left
+        nil))))
 
 (defn read-key
-  "Reads a single key from terminal. Returns keyword for special keys.
+  "Reads a single key from terminal.
    Blocks until a key is available or timeout (ms) expires.
    Returns nil on timeout."
   [^org.jline.terminal.Terminal terminal timeout-ms]
   (let [^NonBlockingReader reader (.reader terminal)
         ch (.read reader (long timeout-ms))]
     (cond
-      (= ch -1) nil
-      (= ch -2) nil
-
-      ;; ESC sequence
-      (= ch 27)
-      (let [ch2 (.read reader 50)]
-        (if (= ch2 91) ;; [
-          (let [ch3 (.read reader 50)]
-            (case ch3
-              65 :up
-              66 :down
-              67 :right
-              68 :left
-              nil))
-          nil))
-
-      ;; Enter
-      (or (= ch 13) (= ch 10))
-      :enter
-
-      ;; Regular character
-      :else
-      (char ch))))
+      (or (= ch -1) (= ch -2)) nil
+      (= ch 27) (read-escape-seq reader)
+      (or (= ch 13) (= ch 10)) :enter
+      :else (char ch))))
 
 (defn close-terminal
   "Closes the JLine3 terminal."
