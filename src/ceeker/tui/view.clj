@@ -1,6 +1,7 @@
 (ns ceeker.tui.view
   "TUI rendering using ANSI escape sequences."
-  (:require [clojure.string :as str]))
+  (:require [ceeker.tui.filter :as f]
+            [clojure.string :as str]))
 
 (def ^:private ansi-reset "\033[0m")
 (def ^:private ansi-bold "\033[1m")
@@ -11,14 +12,13 @@
 (def ^:private ansi-red "\033[31m")
 (def ^:private ansi-cyan "\033[36m")
 (def ^:private ansi-blue "\033[34m")
+(def ^:private ansi-magenta "\033[35m")
 
 (def ^:const compact-threshold
   "Terminal width (columns) below which compact card view is used."
   80)
 
-(defn- clear-screen
-  "Returns ANSI escape to clear screen and move cursor to top."
-  []
+(defn- clear-screen []
   "\033[2J\033[H")
 
 (defn- status-badge
@@ -40,34 +40,28 @@
     :codex (str ansi-blue "[Codex]" ansi-reset)
     (str ansi-dim "[???]" ansi-reset)))
 
-(defn- truncate
-  "Truncates string to max-len, adding ellipsis if needed."
-  [s max-len]
+(defn- truncate [s max-len]
   (if (and s (> (count s) max-len))
     (str (subs s 0 (- max-len 1)) "…")
     (or s "")))
 
-(defn- format-time
-  "Formats a timestamp for display (HH:mm:ss portion)."
-  [updated]
+(defn- format-time [updated]
   (if (and updated (>= (count (str updated)) 19))
     (subs (str updated) 11 19)
     (or updated "")))
 
-(defn- cwd-short-name
-  "Extracts the last path component from a cwd path."
-  [cwd]
+(defn- cwd-short-name [cwd]
   (when (seq cwd)
     (last (str/split cwd #"/"))))
 
 (defn- format-session-line
   "Formats a single session line for display."
   [session selected? _index]
-  (let [prefix (if selected?
-                 (str ansi-reverse " > " ansi-reset ansi-reverse)
-                 "   ")
-        suffix (if selected? ansi-reset "")]
-    (str prefix
+  (let [pfx (if selected?
+              (str ansi-reverse " > " ansi-reset ansi-reverse)
+              "   ")
+        sfx (if selected? ansi-reset "")]
+    (str pfx
          (format " %-12s %s %s %-12s %-40s %s"
                  (truncate (:session-id session) 12)
                  (agent-badge (:agent-type session))
@@ -75,7 +69,25 @@
                  (or (cwd-short-name (:cwd session)) "")
                  (truncate (:last-message session) 40)
                  (format-time (:last-updated session)))
-         suffix)))
+         sfx)))
+
+(defn- card-line1 [session selected? sel-start sel-end]
+  (str sel-start
+       "  ┌ " (truncate (:session-id session) 12)
+       " " (agent-badge (:agent-type session))
+       (when selected? ansi-reverse)
+       " " (status-badge (:agent-status session))
+       (when selected? ansi-reverse)
+       sel-end))
+
+(defn- card-line2 [session sel-start sel-end content-width]
+  (let [time-str (format-time (:last-updated session))
+        wt-max (max 5 (- content-width (count time-str) 2))]
+    (str sel-start
+         "  │ " time-str
+         "  " (truncate (or (cwd-short-name (:cwd session)) "")
+                        wt-max)
+         sel-end)))
 
 (defn- format-session-card
   "Formats a single session as a compact card for narrow terminals."
@@ -83,66 +95,67 @@
   (let [content-width (max 10 (- width 4))
         sel-start (if selected? ansi-reverse "")
         sel-end (if selected? ansi-reset "")
-        line1 (str sel-start
-                   "  \u250c " (truncate (:session-id session) 12)
-                   " " (agent-badge (:agent-type session))
-                   (when selected? ansi-reverse)
-                   " " (status-badge (:agent-status session))
-                   (when selected? ansi-reverse)
-                   sel-end)
-        time-str (format-time (:last-updated session))
-        wt-max (max 5 (- content-width (count time-str) 2))
-        line2 (str sel-start
-                   "  \u2502 " time-str
-                   "  " (truncate (or (cwd-short-name (:cwd session)) "")
-                                  wt-max)
-                   sel-end)
+        line1 (card-line1 session selected? sel-start sel-end)
+        line2 (card-line2 session sel-start sel-end content-width)
         line3 (str sel-start
-                   "  \u2502 "
+                   "  │ "
                    (truncate (:last-message session) content-width)
                    sel-end)
-        line4 (str sel-start
-                   "  \u2514\u2500"
-                   sel-end)]
+        line4 (str sel-start "  └─" sel-end)]
     (str/join "\n" [line1 line2 line3 line4])))
 
-(defn- header-line
-  "Returns the header line."
-  [session-count]
-  (str ansi-bold
-       (format "  ceeker \u2014 %d session(s)" session-count)
-       ansi-reset))
+(defn- display-mode-label [display-mode]
+  (case display-mode
+    :auto "Auto"
+    :table "Table"
+    :card "Card"
+    "Auto"))
 
-(defn- separator-line
-  "Returns a separator line."
-  [width]
+(defn- header-line
+  "Returns the header line with filter info."
+  [total shown fs]
+  (let [base (format "  ceeker — %d session(s)" total)
+        desc (when (f/active? fs)
+               (str " [" (f/describe-filters fs)
+                    " → " shown " shown]"))]
+    (str ansi-bold base ansi-reset
+         (when desc
+           (str ansi-magenta desc ansi-reset)))))
+
+(defn- separator-line [width]
   (let [bar-len (max 20 (- width 4))]
     (str ansi-dim
-         "  " (apply str (repeat bar-len "\u2500"))
+         "  " (apply str (repeat bar-len "─"))
          ansi-reset)))
 
-(defn- column-headers
-  "Returns column header line."
-  []
+(defn- column-headers []
   (str ansi-dim
        (format "   %-12s %-9s %-11s %-12s %-40s %s"
                "SESSION" "AGENT" "STATUS"
                "WORKTREE" "MESSAGE" "UPDATED")
        ansi-reset))
 
-(defn- footer-line
-  "Returns the footer help line."
-  [display-mode]
-  (str ansi-dim
-       "  [j/k] Navigate  [Enter] Jump to tmux  "
-       "[r] Refresh  [v] View:"
-       (case display-mode
-         :auto "Auto"
-         :table "Table"
-         :card "Card"
-         "Auto")
-       "  [q] Quit"
-       ansi-reset))
+(defn- footer-line [display-mode search-mode? search-buf]
+  (if search-mode?
+    (str ansi-cyan "  Search: " (or search-buf "") "▌"
+         ansi-dim "  [Enter] Apply  [Esc] Cancel"
+         "  [v] View:" (display-mode-label display-mode)
+         ansi-reset)
+    (str ansi-dim
+         "  [j/k] Nav  [Enter] Jump  [r] Refresh"
+         "  [a] Agent  [s] Status  [/] Search"
+         "  [c] Clear  [v] View:" (display-mode-label display-mode)
+         "  [q] Quit"
+         ansi-reset)))
+
+(defn- sort-for-display
+  "Sorts sessions: running first, then by last-updated."
+  [sessions]
+  (sort-by
+   (fn [s]
+     [(if (= :running (:agent-status s)) 0 1)
+      (or (:last-updated s) "")])
+   sessions))
 
 (defn- use-compact?
   "Determines if compact card view should be used."
@@ -152,48 +165,51 @@
     :card true
     (< width compact-threshold)))
 
-(defn render
-  "Renders the full TUI screen. Returns the string to print.
-   Supports both table and compact card layouts based on terminal width
-   and display-mode (:auto, :table, :card)."
-  ([sessions selected-index]
-   (render sessions selected-index 120 :auto))
-  ([sessions selected-index terminal-width display-mode]
-   (let [width (or terminal-width 120)
-         compact? (use-compact? display-mode width)
-         sorted (sort-by
-                 (fn [s]
-                   [(if (= :running (:agent-status s)) 0 1)
-                    (or (:last-updated s) "")])
-                 sessions)
-         lines (concat
-                [(clear-screen)
-                 (header-line (count sessions))
-                 (separator-line width)]
-                (if compact?
-                  (mapcat
-                   (fn [i s]
-                     [(format-session-card
-                       s (= i selected-index) i width)])
-                   (range)
-                   sorted)
-                  (concat
-                   [(column-headers)
-                    (separator-line width)]
-                   (map-indexed
-                    (fn [i s]
-                      (format-session-line s (= i selected-index) i))
-                    sorted)))
-                [(separator-line width)
-                 (footer-line display-mode)])]
-     (str/join "\n" lines))))
+(defn- session-lines
+  "Renders session rows or empty placeholder."
+  [sorted sel compact? width]
+  (if (empty? sorted)
+    [(str "   " ansi-dim "(no sessions)" ansi-reset)]
+    (if compact?
+      (map-indexed
+       (fn [i s] (format-session-card s (= i sel) i width))
+       sorted)
+      (map-indexed
+       (fn [i s] (format-session-line s (= i sel) i))
+       sorted))))
 
-(defn render-error
-  "Renders an error message at the bottom of screen."
-  [message]
+(defn render
+  "Renders the full TUI screen."
+  ([sessions sel]
+   (render sessions sel 120 :auto f/empty-filter false nil))
+  ([sessions sel terminal-width display-mode]
+   (render sessions sel terminal-width display-mode
+           f/empty-filter false nil))
+  ([sessions sel fs sm? sb]
+   (render sessions sel 120 :auto fs sm? sb))
+  ([sessions sel terminal-width display-mode fs sm? sb]
+   (let [width (or terminal-width 120)
+         mode (or display-mode :auto)
+         fs* (or fs f/empty-filter)
+         filtered (f/apply-filters fs* sessions)
+         sorted (sort-for-display filtered)
+         compact? (use-compact? mode width)]
+     (str/join
+      "\n"
+      (concat
+       [(clear-screen)
+        (header-line (count sessions) (count sorted) fs*)
+        (separator-line width)]
+       (if compact?
+         (session-lines sorted sel true width)
+         (concat
+          [(column-headers) (separator-line width)]
+          (session-lines sorted sel false width)))
+       [(separator-line width)
+        (footer-line mode sm? sb)])))))
+
+(defn render-error [message]
   (str "\n" ansi-red "  Error: " message ansi-reset))
 
-(defn render-message
-  "Renders an info message at the bottom of screen."
-  [message]
+(defn render-message [message]
   (str "\n" ansi-cyan "  " message ansi-reset))

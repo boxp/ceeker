@@ -22,12 +22,20 @@
       (doseq [file (reverse (file-seq f))]
         (.delete file)))))
 
+;; --- Claude Code: official spec payload fixtures ---
+;; All payloads include common fields per the official spec:
+;; session_id, transcript_path, cwd, permission_mode,
+;; hook_event_name
+
 (deftest test-normalize-claude-notification
   (let [result (handler/normalize-event
                 "claude" "Notification"
                 {:session_id "test-123"
-                 :title "Working on task"
-                 :cwd "/tmp/work"})]
+                 :transcript_path "/tmp/transcript.json"
+                 :cwd "/tmp/work"
+                 :permission_mode "default"
+                 :hook_event_name "Notification"
+                 :title "Working on task"})]
     (is (= "test-123" (:session-id result)))
     (is (= :claude-code (:agent-type result)))
     (is (= :running (:agent-status result)))
@@ -38,7 +46,10 @@
   (let [result (handler/normalize-event
                 "claude" "Stop"
                 {:session_id "test-456"
-                 :cwd "/tmp/work"})]
+                 :transcript_path "/tmp/transcript.json"
+                 :cwd "/tmp/work"
+                 :permission_mode "default"
+                 :hook_event_name "Stop"})]
     (is (= "test-456" (:session-id result)))
     (is (= :claude-code (:agent-type result)))
     (is (= :completed (:agent-status result)))))
@@ -47,11 +58,165 @@
   (let [result (handler/normalize-event
                 "claude" "PreToolUse"
                 {:session_id "test-789"
+                 :transcript_path "/tmp/transcript.json"
+                 :cwd "/tmp/work"
+                 :permission_mode "default"
+                 :hook_event_name "PreToolUse"
                  :tool_name "Bash"
-                 :cwd "/tmp/work"})]
+                 :tool_input {:command "npm test"}})]
     (is (= "test-789" (:session-id result)))
     (is (= :running (:agent-status result)))
     (is (= "using: Bash" (:last-message result)))))
+
+(deftest test-normalize-claude-post-tool-use
+  (let [result (handler/normalize-event
+                "claude" "PostToolUse"
+                {:session_id "test-post"
+                 :transcript_path "/tmp/transcript.json"
+                 :cwd "/tmp/work"
+                 :permission_mode "default"
+                 :hook_event_name "PostToolUse"
+                 :tool_name "Edit"
+                 :tool_input {:file_path "/tmp/f.clj"}
+                 :tool_output "OK"})]
+    (is (= "test-post" (:session-id result)))
+    (is (= :running (:agent-status result)))
+    (is (= "used: Edit" (:last-message result)))))
+
+(deftest test-normalize-claude-post-tool-use-failure
+  (let [result (handler/normalize-event
+                "claude" "PostToolUseFailure"
+                {:session_id "test-fail"
+                 :transcript_path "/tmp/transcript.json"
+                 :cwd "/tmp/work"
+                 :permission_mode "default"
+                 :hook_event_name "PostToolUseFailure"
+                 :tool_name "Bash"
+                 :tool_input {:command "make build"}})]
+    (is (= "test-fail" (:session-id result)))
+    (is (= :running (:agent-status result)))
+    (is (= "failed: Bash" (:last-message result)))))
+
+(deftest test-normalize-claude-session-start
+  (let [result (handler/normalize-event
+                "claude" "SessionStart"
+                {:session_id "sess-start"
+                 :transcript_path "/tmp/transcript.json"
+                 :cwd "/home/user/project"
+                 :permission_mode "default"
+                 :hook_event_name "SessionStart"})]
+    (is (= "sess-start" (:session-id result)))
+    (is (= :claude-code (:agent-type result)))
+    (is (= :running (:agent-status result)))
+    (is (= "session started" (:last-message result)))
+    (is (= "/home/user/project" (:cwd result)))))
+
+(deftest test-normalize-claude-session-end
+  (let [result (handler/normalize-event
+                "claude" "SessionEnd"
+                {:session_id "sess-end"
+                 :transcript_path "/tmp/transcript.json"
+                 :cwd "/home/user/project"
+                 :permission_mode "default"
+                 :hook_event_name "SessionEnd"})]
+    (is (= "sess-end" (:session-id result)))
+    (is (= :completed (:agent-status result)))
+    (is (= "session terminated"
+           (:last-message result)))))
+
+(deftest test-normalize-claude-subagent-start
+  (let [result (handler/normalize-event
+                "claude" "SubagentStart"
+                {:session_id "sub-start"
+                 :transcript_path "/tmp/transcript.json"
+                 :cwd "/tmp/work"
+                 :permission_mode "default"
+                 :hook_event_name "SubagentStart"})]
+    (is (= "sub-start" (:session-id result)))
+    (is (= :running (:agent-status result)))
+    (is (= "subagent spawned"
+           (:last-message result)))))
+
+(deftest test-normalize-claude-subagent-stop
+  (let [result (handler/normalize-event
+                "claude" "SubagentStop"
+                {:session_id "sub-stop"
+                 :transcript_path "/tmp/transcript.json"
+                 :cwd "/tmp/work"
+                 :permission_mode "default"
+                 :hook_event_name "SubagentStop"})]
+    (is (= "sub-stop" (:session-id result)))
+    (is (= :running (:agent-status result)))
+    (is (= "subagent completed"
+           (:last-message result)))))
+
+(deftest test-normalize-claude-task-completed
+  (let [result (handler/normalize-event
+                "claude" "TaskCompleted"
+                {:session_id "task-done"
+                 :transcript_path "/tmp/transcript.json"
+                 :cwd "/tmp/work"
+                 :permission_mode "default"
+                 :hook_event_name "TaskCompleted"})]
+    (is (= "task-done" (:session-id result)))
+    (is (= :completed (:agent-status result)))
+    (is (= "task completed"
+           (:last-message result)))))
+
+;; --- Claude: hook_event_name fallback ---
+
+(deftest test-claude-hook-event-name-fallback
+  (let [dir (temp-dir)]
+    (try
+      (let [payload
+            (json/generate-string
+             {:session_id "fallback-1"
+              :transcript_path "/tmp/t.json"
+              :cwd "/tmp/work"
+              :permission_mode "default"
+              :hook_event_name "Stop"})
+            result (handler/handle-hook!
+                    dir "claude" nil payload)]
+        (is (= "fallback-1" (:session-id result)))
+        (is (= :completed (:agent-status result)))
+        (is (= "session ended"
+               (:last-message result))))
+      (finally
+        (cleanup-dir dir)))))
+
+;; --- Claude: E2E with real payload ---
+
+(deftest test-claude-real-payload-e2e
+  (let [dir (temp-dir)]
+    (try
+      (let [payload
+            (json/generate-string
+             {:session_id "abc123"
+              :transcript_path
+              "/home/user/.claude/projects/p/t.json"
+              :cwd "/home/user/project"
+              :permission_mode "default"
+              :hook_event_name "PreToolUse"
+              :tool_name "Bash"
+              :tool_input {:command "npm test"}})
+            result (handler/handle-hook!
+                    dir "claude" "PreToolUse"
+                    payload)]
+        (is (= "abc123" (:session-id result)))
+        (is (= :claude-code (:agent-type result)))
+        (is (= :running (:agent-status result)))
+        (is (= "using: Bash" (:last-message result)))
+        (is (= "/home/user/project" (:cwd result)))
+        (let [stored (store/read-sessions dir)
+              session (get-in stored
+                              [:sessions "abc123"])]
+          (is (some? session))
+          (is (= :claude-code
+                 (:agent-type session)))))
+      (finally
+        (cleanup-dir dir)))))
+
+;; --- Codex tests ---
 
 (deftest test-normalize-codex-notification
   (let [result (handler/normalize-event
@@ -83,17 +248,23 @@
     (try
       (let [payload (json/generate-string
                      {:session_id "hook-test-1"
-                      :title "Testing hook"
-                      :cwd "/tmp/hook-test"})
+                      :transcript_path "/tmp/t.json"
+                      :cwd "/tmp/hook-test"
+                      :permission_mode "default"
+                      :hook_event_name "Notification"
+                      :title "Testing hook"})
             result (handler/handle-hook!
-                    dir "claude" "Notification" payload)]
+                    dir "claude" "Notification"
+                    payload)]
         (is (= "hook-test-1" (:session-id result)))
         (is (= :claude-code (:agent-type result)))
         (let [stored (store/read-sessions dir)
               session (get-in stored
-                              [:sessions "hook-test-1"])]
+                              [:sessions
+                               "hook-test-1"])]
           (is (some? session))
-          (is (= :claude-code (:agent-type session)))))
+          (is (= :claude-code
+                 (:agent-type session)))))
       (finally
         (cleanup-dir dir)))))
 
@@ -103,12 +274,14 @@
       (let [payload
             (json/generate-string
              {:type "agent-turn-complete"
-              :thread-id "b5f6c1c2-1111-2222-3333-444455556666"
+              :thread-id
+              "b5f6c1c2-1111-2222-3333-444455556666"
               :turn-id "12345"
               :cwd "/home/user/project"
               :client "codex-tui"
               :input-messages ["Fix the tests"]
-              :last-assistant-message "All tests pass now."})
+              :last-assistant-message
+              "All tests pass now."})
             result (handler/handle-hook!
                     dir "codex" nil payload)]
         (is (= "b5f6c1c2-1111-2222-3333-444455556666"
@@ -119,10 +292,11 @@
                (:last-message result)))
         (is (= "/home/user/project" (:cwd result)))
         (let [stored (store/read-sessions dir)
-              session (get-in
-                       stored
-                       [:sessions
-                        "b5f6c1c2-1111-2222-3333-444455556666"])]
+              session
+              (get-in
+               stored
+               [:sessions
+                "b5f6c1c2-1111-2222-3333-444455556666"])]
           (is (some? session))
           (is (= :codex (:agent-type session)))
           (is (= "/home/user/project"
@@ -142,7 +316,8 @@
             result (handler/handle-hook!
                     dir "codex" nil payload)]
         (is (= "abc-123" (:session-id result)))
-        (is (= "notification" (:last-message result))))
+        (is (= "notification"
+               (:last-message result))))
       (finally
         (cleanup-dir dir)))))
 
@@ -155,7 +330,8 @@
               :message "Running"
               :cwd "/tmp/legacy"})
             result (handler/handle-hook!
-                    dir "codex" "notification" payload)]
+                    dir "codex" "notification"
+                    payload)]
         (is (= "legacy-1" (:session-id result)))
         (is (= "Running" (:last-message result))))
       (finally
