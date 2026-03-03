@@ -88,6 +88,20 @@ notify = ["ceeker", "hook", "codex"]
 
 Codex は `notify` コマンドの最後の引数として JSON ペイロードを追加します（stdin ではなく argv 経由）。
 
+## セッション自動整理
+
+tmuxペインが終了すると、対応するセッションは自動的に `Closed` 状態に遷移します。
+
+**チェックタイミング:**
+
+- TUI起動時に全セッションを一括チェック
+- TUI表示中は約10秒ごとに定期チェック
+- hookイベント受信時にもチェック実行
+
+**仕組み:**
+
+`tmux list-panes -a` を1回実行して全ペインのcwdを取得し、`running` 状態のセッションのcwdと照合します。一致するペインがない場合、セッションは `closed` に遷移します。tmuxが利用できない場合はチェックをスキップします。
+
 ## State Store
 
 セッション状態は `$XDG_RUNTIME_DIR/ceeker/sessions.edn` に永続化されます（フォールバック: `/tmp/ceeker-<user>/sessions.edn`）。

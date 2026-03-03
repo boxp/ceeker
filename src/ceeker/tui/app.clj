@@ -1,10 +1,21 @@
 (ns ceeker.tui.app
   "TUI application main loop."
   (:require [ceeker.state.store :as store]
+            [ceeker.tmux.pane :as pane]
             [ceeker.tui.input :as input]
             [ceeker.tui.view :as view]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
+
+(def ^:private check-interval
+  "Pane liveness check interval in ticks (~1s each)."
+  10)
+
+(defn- maybe-check-panes!
+  "Runs pane liveness check when tick is due."
+  [tick state-dir]
+  (when (zero? (mod tick check-interval))
+    (pane/close-stale-sessions! state-dir)))
 
 (defn- get-session-list
   "Gets sorted session list from state store."
@@ -103,25 +114,39 @@
     [selected (view/render-message "Refreshed")]
     :else [selected nil]))
 
+(defn- tui-tick
+  "Executes one tick of the TUI loop. Returns next
+   [selected message tick] or nil to quit."
+  [terminal state-dir selected message tick]
+  (maybe-check-panes! tick state-dir)
+  (let [sessions (get-session-list state-dir)
+        max-idx (max 0 (dec (count sessions)))
+        sel (clamp selected 0 max-idx)
+        sorted (sort-sessions sessions)
+        screen (render-screen sorted sel message)]
+    (print screen)
+    (flush)
+    (let [key (input/read-key terminal 1000)
+          result (handle-key-input
+                  key sel max-idx sorted)]
+      (when result
+        [(first result) (second result)
+         (inc tick)]))))
+
 (defn start-tui!
   "Runs the TUI application loop."
   ([] (start-tui! nil))
   ([state-dir]
    (let [terminal (input/create-terminal)]
      (try
-       (loop [selected 0, message nil]
-         (let [sessions (get-session-list state-dir)
-               max-idx (max 0 (dec (count sessions)))
-               selected (clamp selected 0 max-idx)
-               sorted (sort-sessions sessions)
-               screen (render-screen sorted selected message)]
-           (print screen)
-           (flush)
-           (let [key (input/read-key terminal 1000)
-                 result (handle-key-input
-                         key selected max-idx sorted)]
-             (when result
-               (recur (first result) (second result))))))
+       (loop [selected 0, message nil, tick 0]
+         (when-let [next-state (tui-tick terminal
+                                         state-dir
+                                         selected
+                                         message tick)]
+           (recur (nth next-state 0)
+                  (nth next-state 1)
+                  (nth next-state 2))))
        (finally
          (print "\033[2J\033[H")
          (flush)
