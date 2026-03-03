@@ -14,9 +14,7 @@
   "Closes WatchService safely."
   [^WatchService ws]
   (when ws
-    (try
-      (.close ws)
-      (catch Exception _ nil))))
+    (.close ws)))
 
 (defn- register-state-dir!
   "Registers state directory events to WatchService."
@@ -33,38 +31,32 @@
   ([] (create-watcher (store/state-dir)))
   ([state-dir]
    (let [^WatchService ws
-         (try
-           (.newWatchService (FileSystems/getDefault))
-           (catch Exception _ nil))]
-     (when ws
-       (try
-         (let [^Path dir-path (.toPath (io/file state-dir))]
-           (store/ensure-state-dir! state-dir)
-           (register-state-dir! dir-path ws)
-           {:watch-service ws :state-dir state-dir})
-         (catch Exception _
-           (close-watch-service! ws)
-           nil))))))
+         (.newWatchService (FileSystems/getDefault))]
+     (try
+       (let [^Path dir-path (.toPath (io/file state-dir))]
+         (store/ensure-state-dir! state-dir)
+         (register-state-dir! dir-path ws)
+         {:watch-service ws :state-dir state-dir})
+       (catch Exception e
+         (close-watch-service! ws)
+         (throw e))))))
 
 (defn poll-change
   "Polls for file changes with timeout.
    Returns true if sessions.edn was modified, false otherwise."
   [watcher timeout-ms]
   (when watcher
-    (try
-      (let [^WatchService ws (:watch-service watcher)
-            ^WatchKey key (.poll ws timeout-ms TimeUnit/MILLISECONDS)]
-        (if key
-          (let [changed?
-                (some
-                 (fn [^WatchEvent evt]
-                   (= (str (.context evt))
-                      sessions-file-name))
-                 (.pollEvents key))]
-            (.reset key)
-            (boolean changed?))
-          false))
-      (catch Exception _
+    (let [^WatchService ws (:watch-service watcher)
+          ^WatchKey key (.poll ws timeout-ms TimeUnit/MILLISECONDS)]
+      (if key
+        (let [changed?
+              (some
+               (fn [^WatchEvent evt]
+                 (= (str (.context evt))
+                    sessions-file-name))
+               (.pollEvents key))]
+          (.reset key)
+          (boolean changed?))
         false))))
 
 (defn close-watcher

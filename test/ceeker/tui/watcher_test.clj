@@ -14,10 +14,10 @@
       (watcher/close-watcher w))))
 
 (deftest test-create-watcher-invalid-dir
-  (testing "returns nil for non-existent directory"
-    (let [w (watcher/create-watcher
-             "/nonexistent/path/ceeker-test")]
-      (is (nil? w)))))
+  (testing "throws when state directory cannot be created"
+    (is (thrown? Exception
+                 (watcher/create-watcher
+                  "/proc/ceeker-test")))))
 
 (deftest test-poll-change-nil-watcher
   (testing "poll-change returns nil for nil watcher"

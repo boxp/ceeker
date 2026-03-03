@@ -30,10 +30,7 @@
 (defn- read-stdin
   "Reads all stdin input. Blocks until EOF."
   []
-  (try
-    (slurp System/in)
-    (catch Exception _
-      "")))
+  (slurp System/in))
 
 (defn payload-from-cli
   "Returns the optional JSON payload provided as CLI arguments after agent/event."
