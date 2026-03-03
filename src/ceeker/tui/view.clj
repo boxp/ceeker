@@ -13,7 +13,7 @@
 (def ^:private ansi-blue "\033[34m")
 
 (def ^:const compact-threshold
-  "Terminal width below which compact card view is used."
+  "Terminal width (columns) below which compact card view is used."
   80)
 
 (defn- clear-screen
