@@ -90,9 +90,12 @@
                    " " (status-badge (:agent-status session))
                    (when selected? ansi-reverse)
                    sel-end)
+        time-str (format-time (:last-updated session))
+        wt-max (max 5 (- content-width (count time-str) 2))
         line2 (str sel-start
-                   "  \u2502 " (format-time (:last-updated session))
-                   "  " (or (cwd-short-name (:cwd session)) "")
+                   "  \u2502 " time-str
+                   "  " (truncate (or (cwd-short-name (:cwd session)) "")
+                                  wt-max)
                    sel-end)
         line3 (str sel-start
                    "  \u2502 "
