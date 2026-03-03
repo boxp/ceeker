@@ -1,6 +1,6 @@
 (ns ceeker.tmux.pane
   "tmux pane liveness checking.
-   Detects stale sessions by checking pane existence."
+   Detects stale sessions by checking tmux pane existence."
   (:require [ceeker.state.store :as store]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
