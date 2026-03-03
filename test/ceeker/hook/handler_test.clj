@@ -350,10 +350,9 @@
 (deftest test-handle-hook-invalid-json
   (let [dir (temp-dir)]
     (try
-      (let [result (handler/handle-hook!
+      (is (thrown? Exception
+                   (handler/handle-hook!
                     dir "claude" "Notification"
-                    "not json")]
-        (is (= :claude-code (:agent-type result)))
-        (is (some? (:session-id result))))
+                    "not json")))
       (finally
         (cleanup-dir dir)))))
