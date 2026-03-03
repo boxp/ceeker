@@ -37,8 +37,8 @@
                    (get-in payload [:session :session_id])
                    (str (java.util.UUID/randomUUID)))
    :cwd (or (:cwd payload)
-             (get-in payload [:session :cwd])
-             "")})
+            (get-in payload [:session :cwd])
+            "")})
 
 (defn- claude-event-fields
   "Returns [status message] for a Claude event type."
