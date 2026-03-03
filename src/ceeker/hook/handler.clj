@@ -31,28 +31,37 @@
    :last-updated (current-timestamp)})
 
 (defn- extract-claude-identity
-  "Extracts session-id and cwd from Claude payload."
+  "Extracts session-id and cwd from Claude payload.
+   Per official spec, session_id and cwd are top-level fields."
   [payload]
   {:session-id (or (:session_id payload)
-                   (get-in payload [:session :session_id])
                    (str (java.util.UUID/randomUUID)))
-   :cwd (or (:cwd payload)
-            (get-in payload [:session :cwd])
-            "")})
+   :cwd (or (:cwd payload) "")})
+
+(defn- tool-message
+  "Builds a tool event message string."
+  [prefix payload]
+  (str prefix (or (:tool_name payload) "tool")))
 
 (defn- claude-event-fields
-  "Returns [status message] for a Claude event type."
+  "Returns [status message] for a Claude event type.
+   Supports all official hook events per the spec."
   [event-type payload]
   (case event-type
-    "Notification" [:running (or (:title payload)
-                                 (:message payload)
-                                 "notification")]
+    "SessionStart" [:running "session started"]
+    "Notification" [:running
+                    (or (:title payload)
+                        (:message payload)
+                        "notification")]
     "Stop" [:completed "session ended"]
+    "SessionEnd" [:completed "session terminated"]
+    "SubagentStart" [:running "subagent spawned"]
     "SubagentStop" [:running "subagent completed"]
-    "PreToolUse" [:running (str "using: "
-                                (or (:tool_name payload) "tool"))]
-    "PostToolUse" [:running (str "used: "
-                                 (or (:tool_name payload) "tool"))]
+    "PreToolUse" [:running (tool-message "using: " payload)]
+    "PostToolUse" [:running (tool-message "used: " payload)]
+    "PostToolUseFailure" [:running
+                          (tool-message "failed: " payload)]
+    "TaskCompleted" [:completed "task completed"]
     [:running (str "event: " event-type)]))
 
 (defn- normalize-claude-event
@@ -117,20 +126,33 @@
         (codex-type->event t))
       "notification"))
 
+(defn- resolve-claude-event
+  "Resolves event type for Claude.
+   Uses hook_event_name from payload per official spec."
+  [event-type payload]
+  (or event-type
+      (:hook_event_name payload)
+      "Notification"))
+
 (defn handle-hook!
   "Handles a hook event: parses, normalizes, writes to store."
   ([agent-type event-type stdin-input]
    (handle-hook! nil agent-type event-type stdin-input))
   ([state-dir agent-type event-type stdin-input]
    (let [payload (or (parse-hook-payload stdin-input) {})
-         effective-event (if (= agent-type "codex")
-                           (resolve-codex-event
-                            event-type payload)
-                           event-type)
+         effective-event
+         (case agent-type
+           "codex" (resolve-codex-event
+                    event-type payload)
+           (resolve-claude-event
+            event-type payload))
          session-data (normalize-event
-                       agent-type effective-event payload)
+                       agent-type effective-event
+                       payload)
          session-id (:session-id session-data)]
      (if state-dir
-       (store/update-session! state-dir session-id session-data)
-       (store/update-session! session-id session-data))
+       (store/update-session!
+        state-dir session-id session-data)
+       (store/update-session!
+        session-id session-data))
      session-data)))
