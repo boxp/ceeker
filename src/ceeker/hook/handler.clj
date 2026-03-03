@@ -2,7 +2,8 @@
   "Hook event handler for Claude Code and Codex.
    Normalizes hook payloads and writes to State Store."
   (:require [ceeker.state.store :as store]
-            [cheshire.core :as json]))
+            [cheshire.core :as json]
+            [clojure.string :as str]))
 
 (defn- current-timestamp
   "Returns current ISO-8601 timestamp string."
@@ -13,7 +14,7 @@
   "Parses JSON hook payload from stdin string.
    Returns nil if input is empty or invalid."
   [input]
-  (when (and input (not (empty? (clojure.string/trim input))))
+  (when (and input (seq (str/trim input)))
     (try
       (json/parse-string input true)
       (catch Exception _

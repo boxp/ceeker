@@ -1,7 +1,7 @@
 (ns ceeker.state.store-test
   (:require [ceeker.state.store :as store]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is]]))
 
 (defn- temp-dir
   "Creates a temporary directory for testing."

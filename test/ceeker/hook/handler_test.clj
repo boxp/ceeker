@@ -3,7 +3,7 @@
             [ceeker.state.store :as store]
             [cheshire.core :as json]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is]]))
 
 (defn- temp-dir
   "Creates a temporary directory for testing."

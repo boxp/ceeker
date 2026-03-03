@@ -15,7 +15,7 @@
   []
   (let [xdg (System/getenv "XDG_RUNTIME_DIR")
         uid (System/getProperty "user.name")]
-    (if (and xdg (not (empty? xdg)))
+    (if (seq xdg)
       (str xdg "/ceeker")
       (str "/tmp/ceeker-" uid))))
 

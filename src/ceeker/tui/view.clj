@@ -1,5 +1,6 @@
 (ns ceeker.tui.view
-  "TUI rendering using ANSI escape sequences.")
+  "TUI rendering using ANSI escape sequences."
+  (:require [clojure.string :as str]))
 
 (def ^:private ansi-reset "\033[0m")
 (def ^:private ansi-bold "\033[1m")
@@ -53,7 +54,7 @@
         agent (agent-badge (:agent-type session))
         status (status-badge (:agent-status session))
         cwd-short (when-let [cwd (:cwd session)]
-                    (let [parts (clojure.string/split cwd #"/")]
+                    (let [parts (str/split cwd #"/")]
                       (last parts)))
         msg (truncate (:last-message session) 40)
         updated (:last-updated session)]
@@ -124,7 +125,7 @@
                 session-list)
                [(separator-line)
                 (footer-line)])]
-    (clojure.string/join "\n" lines)))
+    (str/join "\n" lines)))
 
 (defn render-error
   "Renders an error message at the bottom of screen."

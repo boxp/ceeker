@@ -2,6 +2,7 @@
   "Entry point for ceeker CLI."
   (:require [ceeker.hook.handler :as hook]
             [ceeker.tui.app :as tui]
+            [clojure.string :as str]
             [clojure.tools.cli :as cli])
   (:gen-class))
 
@@ -11,7 +12,7 @@
 (defn- usage
   "Returns usage string."
   [summary]
-  (clojure.string/join
+  (str/join
    \newline
    ["ceeker - AI Coding Agent Session Monitor"
     ""
@@ -74,4 +75,4 @@
       (handle-hook-command (rest arguments))
 
       :else
-      (tui/run!))))
+      (tui/start-tui!))))
