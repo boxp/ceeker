@@ -109,7 +109,12 @@
       (is (nil? (:agent-filter f0)))
       (is (= :claude-code (:agent-filter f1)))
       (is (= :codex (:agent-filter f2)))
-      (is (nil? (:agent-filter f3))))))
+      (is (nil? (:agent-filter f3)))))
+
+  (testing "unknown agent filter falls back to first cycle item"
+    (let [f0 (assoc f/empty-filter :agent-filter :unknown)
+          f1 (f/toggle-agent-filter f0)]
+      (is (nil? (:agent-filter f1))))))
 
 (deftest test-toggle-status-filter
   (testing "cycles through status filters"
@@ -118,7 +123,12 @@
           f2 (f/toggle-status-filter f1)]
       (is (nil? (:status-filter f0)))
       (is (= :running (:status-filter f1)))
-      (is (= :completed (:status-filter f2))))))
+      (is (= :completed (:status-filter f2)))))
+
+  (testing "unknown status filter falls back to first cycle item"
+    (let [f0 (assoc f/empty-filter :status-filter :unknown)
+          f1 (f/toggle-status-filter f0)]
+      (is (nil? (:status-filter f1))))))
 
 (deftest test-clear-filters
   (testing "resets all filters"

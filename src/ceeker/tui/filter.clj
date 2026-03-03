@@ -19,7 +19,12 @@
 (defn- next-in-cycle
   "Returns the next value in a cycle after current."
   [cycle-vec current]
-  (let [idx (.indexOf cycle-vec current)
+  (let [idx (or (first
+                 (keep-indexed
+                  (fn [i v]
+                    (when (= v current) i))
+                  cycle-vec))
+                -1)
         next-idx (mod (inc idx) (count cycle-vec))]
     (nth cycle-vec next-idx)))
 
