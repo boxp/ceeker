@@ -97,7 +97,7 @@
     (= key :enter)
     {:sm? false :sb nil
      :fs (f/set-search-query filter-state search-buf)}
-    (or (= key 27) (= key (char 27)))
+    (= key :escape)
     {:sm? false :sb nil :fs filter-state}
     (or (= key (char 127)) (= key (char 8)))
     {:sm? true :fs filter-state
@@ -114,7 +114,7 @@
   "Handles navigation and action keys."
   [key sel max-idx visible fs]
   (cond
-    (= key \q) nil
+    (= key \q) {:quit true}
     (or (= key :up) (= key \k))
     {:sel (max 0 (dec sel)) :fs fs}
     (or (= key :down) (= key \j))
@@ -155,6 +155,16 @@
     :else (handle-normal-key
            key clamped max-idx visible fs)))
 
+(defn- wait-for-input
+  "Waits for key or file change, returns key or nil."
+  [terminal w]
+  (loop []
+    (let [key (input/read-key terminal 500)]
+      (cond
+        (some? key) key
+        (or (nil? w) (watcher/poll-change w 0)) nil
+        :else (recur)))))
+
 (defn- create-watcher-for
   "Creates a watcher for the given state dir."
   [state-dir]
@@ -175,12 +185,11 @@
       (print scr)
       (flush)
       (let [r (process-key
-               (input/read-key terminal 500)
+               (wait-for-input terminal w)
                cl sm? sb visible mx fs)]
         (cond
           (:idle r)
-          (do (watcher/poll-change w 0)
-              (recur cl nil fs sm? sb))
+          (recur cl nil fs sm? sb)
           (nil? (:fs r)) nil
           :else
           (recur (get r :sel cl) (:msg r) (:fs r)
