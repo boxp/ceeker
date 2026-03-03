@@ -1,4 +1,4 @@
-.PHONY: test lint format-check format ci run clean
+.PHONY: test lint format-check format ci run clean uber
 
 test:
 	clojure -M:test
@@ -16,6 +16,9 @@ ci: format-check lint test
 
 run:
 	clojure -M:run
+
+uber:
+	clojure -T:build uber
 
 clean:
 	rm -rf .cpcache target
