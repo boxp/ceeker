@@ -97,7 +97,7 @@
     (= key :enter)
     {:sm? false :sb nil
      :fs (f/set-search-query filter-state search-buf)}
-    (or (= key 27) (= key (char 27)))
+    (= key :escape)
     {:sm? false :sb nil :fs filter-state}
     (or (= key (char 127)) (= key (char 8)))
     {:sm? true :fs filter-state
@@ -114,7 +114,7 @@
   "Handles navigation and action keys."
   [key sel max-idx visible fs]
   (cond
-    (= key \q) nil
+    (= key \q) {:quit true}
     (or (= key :up) (= key \k))
     {:sel (max 0 (dec sel)) :fs fs}
     (or (= key :down) (= key \j))
