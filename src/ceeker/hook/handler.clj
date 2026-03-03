@@ -65,18 +65,29 @@
                   status (:cwd id) message)))
 
 (defn- extract-codex-identity
-  "Extracts session-id and cwd from Codex payload."
+  "Extracts session-id and cwd from Codex payload.
+   Supports both snake_case (legacy) and kebab-case (Codex notify)."
   [payload]
   {:session-id (or (:session_id payload)
+                   (:thread-id payload)
                    (str (java.util.UUID/randomUUID)))
    :cwd (or (:cwd payload) "")})
+
+(defn- codex-type->event
+  "Maps Codex notify type field to internal event type."
+  [type-field]
+  (case type-field
+    "agent-turn-complete" "notification"
+    type-field))
 
 (defn- codex-event-fields
   "Returns [status message] for a Codex event type."
   [event-type payload]
   (case event-type
-    "notification" [:running (or (:message payload)
-                                 "notification")]
+    "notification" [:running
+                    (or (:message payload)
+                        (:last-assistant-message payload)
+                        "notification")]
     "stop" [:completed "session ended"]
     [:running (str "event: " event-type)]))
 
@@ -98,14 +109,26 @@
     (throw (ex-info (str "Unknown agent type: " agent-type)
                     {:agent-type agent-type}))))
 
+(defn- resolve-codex-event
+  "Resolves event type for Codex when not explicitly given."
+  [event-type payload]
+  (or event-type
+      (when-let [t (:type payload)]
+        (codex-type->event t))
+      "notification"))
+
 (defn handle-hook!
   "Handles a hook event: parses, normalizes, writes to store."
   ([agent-type event-type stdin-input]
    (handle-hook! nil agent-type event-type stdin-input))
   ([state-dir agent-type event-type stdin-input]
    (let [payload (or (parse-hook-payload stdin-input) {})
+         effective-event (if (= agent-type "codex")
+                           (resolve-codex-event
+                            event-type payload)
+                           event-type)
          session-data (normalize-event
-                       agent-type event-type payload)
+                       agent-type effective-event payload)
          session-id (:session-id session-data)]
      (if state-dir
        (store/update-session! state-dir session-id session-data)

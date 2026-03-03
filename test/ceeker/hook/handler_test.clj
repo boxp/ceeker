@@ -97,6 +97,70 @@
       (finally
         (cleanup-dir dir)))))
 
+(deftest test-codex-notify-real-payload
+  (let [dir (temp-dir)]
+    (try
+      (let [payload
+            (json/generate-string
+             {:type "agent-turn-complete"
+              :thread-id "b5f6c1c2-1111-2222-3333-444455556666"
+              :turn-id "12345"
+              :cwd "/home/user/project"
+              :client "codex-tui"
+              :input-messages ["Fix the tests"]
+              :last-assistant-message "All tests pass now."})
+            result (handler/handle-hook!
+                    dir "codex" nil payload)]
+        (is (= "b5f6c1c2-1111-2222-3333-444455556666"
+               (:session-id result)))
+        (is (= :codex (:agent-type result)))
+        (is (= :running (:agent-status result)))
+        (is (= "All tests pass now."
+               (:last-message result)))
+        (is (= "/home/user/project" (:cwd result)))
+        (let [stored (store/read-sessions dir)
+              session (get-in
+                       stored
+                       [:sessions
+                        "b5f6c1c2-1111-2222-3333-444455556666"])]
+          (is (some? session))
+          (is (= :codex (:agent-type session)))
+          (is (= "/home/user/project"
+                 (:cwd session)))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-codex-notify-no-message
+  (let [dir (temp-dir)]
+    (try
+      (let [payload
+            (json/generate-string
+             {:type "agent-turn-complete"
+              :thread-id "abc-123"
+              :cwd "/tmp/work"
+              :last-assistant-message nil})
+            result (handler/handle-hook!
+                    dir "codex" nil payload)]
+        (is (= "abc-123" (:session-id result)))
+        (is (= "notification" (:last-message result))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-codex-legacy-explicit-event
+  (let [dir (temp-dir)]
+    (try
+      (let [payload
+            (json/generate-string
+             {:session_id "legacy-1"
+              :message "Running"
+              :cwd "/tmp/legacy"})
+            result (handler/handle-hook!
+                    dir "codex" "notification" payload)]
+        (is (= "legacy-1" (:session-id result)))
+        (is (= "Running" (:last-message result))))
+      (finally
+        (cleanup-dir dir)))))
+
 (deftest test-handle-hook-empty-payload
   (let [dir (temp-dir)]
     (try
