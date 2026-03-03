@@ -4,23 +4,4 @@
  :remove-consecutive-blank-lines? true
  :insert-missing-whitespace? true
  :align-associative? false
- :sort-ns-references? true
- :indents {defn [[:inner 0]]
-           fn [[:inner 0]]
-           let [[:block 1]]
-           when [[:block 1]]
-           when-let [[:block 1]]
-           when-not [[:block 1]]
-           if [[:block 1]]
-           if-let [[:block 1]]
-           if-not [[:block 1]]
-           cond [[:block 0]]
-           condp [[:block 2]]
-           try [[:block 0]]
-           catch [[:block 2]]
-           doseq [[:block 1]]
-           dotimes [[:block 1]]
-           for [[:block 1]]
-           loop [[:block 1]]
-           testing [[:block 1]]
-           deftest [[:inner 0]]}}
+ :sort-ns-references? true}
