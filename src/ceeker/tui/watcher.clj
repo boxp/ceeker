@@ -10,17 +10,20 @@
    Returns a watcher map or nil if WatchService is unavailable."
   ([] (create-watcher (store/state-dir)))
   ([state-dir]
-   (try
-     (let [dir-path (.toPath (io/file state-dir))
-           ws (.newWatchService (FileSystems/getDefault))]
-       (store/ensure-state-dir! state-dir)
-       (.register dir-path ws
-                  (into-array
-                   [StandardWatchEventKinds/ENTRY_MODIFY
-                    StandardWatchEventKinds/ENTRY_CREATE]))
-       {:watch-service ws :state-dir state-dir})
-     (catch Exception _
-       nil))))
+   (let [ws (try (.newWatchService (FileSystems/getDefault))
+                 (catch Exception _ nil))]
+     (when ws
+       (try
+         (let [dir-path (.toPath (io/file state-dir))]
+           (store/ensure-state-dir! state-dir)
+           (.register dir-path ws
+                      (into-array
+                       [StandardWatchEventKinds/ENTRY_MODIFY
+                        StandardWatchEventKinds/ENTRY_CREATE]))
+           {:watch-service ws :state-dir state-dir})
+         (catch Exception _
+           (.close ws)
+           nil))))))
 
 (defn poll-change
   "Polls for file changes with timeout.
