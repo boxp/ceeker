@@ -44,9 +44,13 @@ ceeker
 ```bash
 # Claude Code hookイベントを処理
 ceeker hook claude Notification <<< '{"session_id":"abc","title":"Working..."}'
+# もしくは引数で JSON を渡す
+ceeker hook claude Notification '{"session_id":"abc","title":"Working..."}'
 
 # Codex hookイベントを処理
 ceeker hook codex notification <<< '{"session_id":"xyz","message":"Testing..."}'
+# もしくは引数で JSON を渡す
+ceeker hook codex notification '{"session_id":"xyz","message":"Testing..."}'
 ```
 
 ## Hook設定
