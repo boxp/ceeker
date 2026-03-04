@@ -1,8 +1,10 @@
 (ns ceeker.tmux.pane
-  "tmux pane liveness checking.
+  "tmux pane liveness checking and state refresh.
    Detects stale sessions by checking tmux pane existence
-   and agent process liveness in the process tree."
+   and agent process liveness in the process tree.
+   Also refreshes running session states via capture-pane."
   (:require [ceeker.state.store :as store]
+            [ceeker.tmux.capture :as capture]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
@@ -29,21 +31,23 @@
    (java.util.regex.Pattern/quote pane-separator)))
 
 (defn- parse-pane-line
-  "Parses a pane info line into a map with :cwd and :pid.
-   PID comes first (digits only), path second (may contain
-   the separator in rare cases, handled by split limit)."
+  "Parses a pane info line into a map with :pid, :cwd,
+   and :pane-id. Uses 3-part split: pid|pane-id|path."
   [line]
-  (let [parts (str/split line pane-sep-re 2)]
-    (when (= 2 (count parts))
-      {:pid (first parts) :cwd (second parts)})))
+  (let [parts (str/split line pane-sep-re 3)]
+    (when (= 3 (count parts))
+      {:pid (nth parts 0)
+       :pane-id (nth parts 1)
+       :cwd (nth parts 2)})))
 
 (defn list-pane-info
-  "Returns a list of maps with :cwd and :pid for each pane.
-   Returns empty list when tmux has no panes.
+  "Returns a list of maps with :cwd, :pid, and :pane-id
+   for each pane. Returns empty list when tmux has no panes.
    Returns nil only if tmux is unavailable."
   []
   (try
     (let [fmt (str "#{pane_pid}"
+                   pane-separator "#{pane_id}"
                    pane-separator "#{pane_current_path}")
           result (shell/sh
                   "tmux" "list-panes" "-a"
@@ -170,3 +174,72 @@
            (store/close-sessions-by-pred!
             state-dir pred)
            (store/close-sessions-by-pred! pred)))))))
+
+(def ^:private debounce-ms
+  "Minimum time (ms) since last hook update before
+   capture-based state refresh is applied."
+  2000)
+
+(defn- recently-updated?
+  "Returns true if the session was updated within
+   debounce-ms milliseconds. Returns false when
+   timestamp is missing or unparseable."
+  [session]
+  (if-let [ts (:last-updated session)]
+    (try
+      (let [updated (.toEpochMilli
+                     (java.time.Instant/parse ts))
+            now (.toEpochMilli (java.time.Instant/now))]
+        (< (- now updated) debounce-ms))
+      (catch Exception _ false))
+    false))
+
+(def ^:private capturable-statuses
+  "Session statuses eligible for capture-pane refresh."
+  #{:running :idle :waiting})
+
+(defn- capture-state-for-session
+  "Detects state for an active session via capture-pane.
+   Returns updated session data or nil if no change is
+   needed. Processes running, idle, and waiting sessions
+   so intermediate transitions are tracked."
+  [session]
+  (when (and (contains? capturable-statuses
+                        (:agent-status session))
+             (seq (:pane-id session))
+             (not (recently-updated? session)))
+    (when-let [detected (capture/detect-agent-state
+                         (:pane-id session)
+                         (:agent-type session))]
+      (when (and (:status detected)
+                 (not= (:status detected)
+                       (:agent-status session)))
+        {:agent-status (:status detected)
+         :last-message (if (:waiting-reason detected)
+                         (str "waiting: "
+                              (:waiting-reason detected))
+                         (name (:status detected)))
+         :last-updated (.toString
+                        (java.time.Instant/now))}))))
+
+(defn refresh-session-states!
+  "Refreshes active session states via capture-pane.
+   Processes sessions in :running, :idle, and :waiting
+   so intermediate transitions are continuously tracked.
+   Uses update-session-if-active! to atomically verify
+   the session is still active before writing, preventing
+   overwrite of newer hook-driven state transitions."
+  ([] (refresh-session-states! nil))
+  ([state-dir]
+   (let [state (if state-dir
+                 (store/read-sessions state-dir)
+                 (store/read-sessions))
+         sessions (:sessions state)]
+     (doseq [[sid session] sessions]
+       (when-let [update-data
+                  (capture-state-for-session session)]
+         (if state-dir
+           (store/update-session-if-active!
+            state-dir sid update-data)
+           (store/update-session-if-active!
+            sid update-data)))))))

@@ -206,6 +206,38 @@
                    (assoc sessions
                           session-id updated)))))))))
 
+(def ^:private capturable-statuses
+  "Session statuses eligible for capture-based updates."
+  #{:running :idle :waiting})
+
+(defn update-session-if-active!
+  "Atomically updates a session only if its current
+   status is active (:running, :idle, :waiting).
+   Prevents capture-based updates from overwriting newer
+   hook-written states (e.g. :completed, :closed).
+   Returns true if the update was applied."
+  ([session-id session-data]
+   (update-session-if-active!
+    (state-dir) session-id session-data))
+  ([dir session-id session-data]
+   (ensure-state-dir! dir)
+   (let [path (state-file-path dir)]
+     (with-file-lock dir
+       (fn []
+         (let [state (read-state-file path)
+               existing (get-in state
+                                [:sessions session-id])]
+           (if (contains? capturable-statuses
+                          (:agent-status existing))
+             (let [updated (merge existing session-data)]
+               (write-state-file!
+                path
+                (assoc-in state
+                          [:sessions session-id]
+                          updated))
+               true)
+             false)))))))
+
 (defn remove-session!
   "Removes a session from the state store."
   ([session-id]
@@ -229,11 +261,12 @@
      (with-file-lock dir
        #(write-state-file! path {:sessions {}})))))
 
-(defn- stale-running?
-  "Returns true if session is running with a cwd
+(defn- stale-active?
+  "Returns true if session is active with a cwd
    not present in pane-cwds."
   [session pane-cwds]
-  (and (= :running (:agent-status session))
+  (and (contains? capturable-statuses
+                  (:agent-status session))
        (seq (:cwd session))
        (not (contains? pane-cwds (:cwd session)))))
 
@@ -243,7 +276,7 @@
   (reduce-kv
    (fn [m sid session]
      (assoc m sid
-            (if (stale-running? session pane-cwds)
+            (if (stale-active? session pane-cwds)
               (merge session
                      {:agent-status :closed
                       :last-message "pane closed"
@@ -253,7 +286,7 @@
    sessions))
 
 (defn close-stale-sessions!
-  "Marks running sessions as :closed when their cwd
+  "Marks active sessions as :closed when their cwd
    is not in pane-cwds set. Atomic under file lock."
   ([pane-cwds]
    (close-stale-sessions! (state-dir) pane-cwds))
@@ -272,13 +305,14 @@
             (assoc state :sessions updated))))))))
 
 (defn- apply-stale-pred
-  "Returns updated sessions map, closing running sessions
+  "Returns updated sessions map, closing active sessions
    for which stale-pred returns true."
   [sessions stale-pred now]
   (reduce-kv
    (fn [m sid session]
      (assoc m sid
-            (if (and (= :running (:agent-status session))
+            (if (and (contains? capturable-statuses
+                                (:agent-status session))
                      (stale-pred sid session))
               (merge session
                      {:agent-status :closed
@@ -289,7 +323,7 @@
    sessions))
 
 (defn close-sessions-by-pred!
-  "Atomically marks running sessions as :closed when
+  "Atomically marks active sessions as :closed when
    stale-pred returns true. stale-pred takes [sid session]."
   ([stale-pred]
    (close-sessions-by-pred! (state-dir) stale-pred))
