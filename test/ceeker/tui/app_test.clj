@@ -69,3 +69,24 @@
                   {:idle true} 2 f/empty-filter
                   false nil :table)]
       (is (= [2 nil f/empty-filter false nil :table] result)))))
+
+(deftest test-handle-normal-key-q-propagates-quit
+  (testing "handle-normal-key propagates quit from nav-key-result"
+    (let [result (#'ceeker.tui.app/handle-normal-key
+                  \q 0 5 [] f/empty-filter :auto)]
+      (is (true? (:quit result)))
+      (is (nil? (#'ceeker.tui.app/next-loop-state
+                 result 0 f/empty-filter false nil :auto))))))
+
+(deftest test-process-key-q-in-normal-mode
+  (testing "process-key returns quit when q pressed in normal mode"
+    (let [result (#'ceeker.tui.app/process-key
+                  \q 0 false nil [] 0 f/empty-filter :auto)]
+      (is (true? (:quit result))))))
+
+(deftest test-process-key-q-in-search-mode
+  (testing "q in search mode adds to buffer instead of quitting"
+    (let [result (#'ceeker.tui.app/process-key
+                  \q 0 true "" [] 0 f/empty-filter :auto)]
+      (is (not (:quit result)))
+      (is (true? (:sm? result))))))
