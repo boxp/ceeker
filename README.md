@@ -43,15 +43,6 @@ chmod +x ceeker-linux-amd64
 sudo mv ceeker-linux-amd64 /usr/local/bin/ceeker
 ```
 
-### raw binary から直接インストール
-
-```bash
-# 例: Linux amd64
-curl -L -o ceeker https://github.com/boxp/ceeker/releases/latest/download/ceeker-linux-amd64
-chmod +x ceeker
-sudo mv ceeker /usr/local/bin/
-```
-
 ## 使い方
 
 ### TUI起動
