@@ -18,6 +18,10 @@
   "Terminal width (columns) below which compact card view is used."
   80)
 
+(def ^:const max-card-message-lines
+  "Maximum number of message lines shown in a card."
+  3)
+
 (defn- clear-screen []
   "\033[2J\033[H")
 
@@ -45,6 +49,80 @@
   (if (and s (> (count s) max-len))
     (str (subs s 0 (- max-len 1)) "…")
     (or s "")))
+
+(defn- char-display-width
+  "Returns terminal display width of a character (2 for CJK/fullwidth, 1 otherwise)."
+  [c]
+  (let [cp (int c)]
+    (if (or (<= 0x1100 cp 0x115F)
+            (<= 0x2E80 cp 0x33FF)
+            (<= 0x3400 cp 0x4DBF)
+            (<= 0x4E00 cp 0x9FFF)
+            (<= 0xAC00 cp 0xD7AF)
+            (<= 0xF900 cp 0xFAFF)
+            (<= 0xFF01 cp 0xFF60)
+            (<= 0xFFE0 cp 0xFFE6)
+            (<= 0x3040 cp 0x30FF)
+            (<= 0x3000 cp 0x303F))
+      2 1)))
+
+(defn- str-display-width
+  "Returns total terminal display width of a string."
+  [s]
+  (if (seq s)
+    (reduce + 0 (map char-display-width s))
+    0))
+
+(defn- substr-by-width
+  "Extracts the longest prefix of s that fits within max-width terminal columns."
+  [s max-width]
+  (let [s (or s "")]
+    (cond
+      (<= max-width 0) ""
+      (<= (str-display-width s) max-width) s
+      :else
+      (loop [chars (seq s)
+             width 0
+             result []]
+        (if (empty? chars)
+          (apply str result)
+          (let [c (first chars)
+                cw (char-display-width c)
+                new-width (+ width cw)]
+            (if (> new-width max-width)
+              (apply str result)
+              (recur (rest chars) new-width (conj result c)))))))))
+
+(defn- truncate-by-width
+  "Truncates string to fit within max-width terminal columns, appending ellipsis."
+  [s max-width]
+  (let [s (or s "")]
+    (cond
+      (<= max-width 0) ""
+      (<= (str-display-width s) max-width) s
+      :else (str (substr-by-width s (dec max-width)) "…"))))
+
+(defn- wrap-by-width
+  "Wraps string into lines that each fit within max-width terminal columns.
+   A single character wider than max-width is placed on its own line."
+  [s max-width]
+  (let [s (or s "")
+        max-width (max 1 max-width)]
+    (if (empty? s)
+      [""]
+      (loop [chars (seq s)
+             width 0
+             current-line []
+             lines []]
+        (if (empty? chars)
+          (conj lines (apply str current-line))
+          (let [c (first chars)
+                cw (char-display-width c)
+                new-width (+ width cw)]
+            (if (and (> new-width max-width) (seq current-line))
+              (recur chars 0 [] (conj lines (apply str current-line)))
+              (recur (rest chars) new-width
+                     (conj current-line c) lines))))))))
 
 (defn- format-time [updated]
   (if (and updated (>= (count (str updated)) 19))
@@ -83,12 +161,29 @@
 
 (defn- card-line2 [session sel-start sel-end content-width]
   (let [time-str (format-time (:last-updated session))
-        wt-max (max 5 (- content-width (count time-str) 2))]
+        wt-max (max 5 (- content-width (str-display-width time-str) 2))]
     (str sel-start
          "  │ " time-str
-         "  " (truncate (or (cwd-short-name (:cwd session)) "")
-                        wt-max)
+         "  " (truncate-by-width (or (cwd-short-name (:cwd session)) "")
+                                 wt-max)
          sel-end)))
+
+(defn- card-message-lines
+  "Wraps message text into card lines with border prefix."
+  [message content-width sel-start sel-end]
+  (let [normalized (str/replace (or message "") #"\r?\n" " ")
+        wrapped (wrap-by-width normalized content-width)
+        truncated? (> (count wrapped) max-card-message-lines)
+        visible (if truncated?
+                  (subvec (vec wrapped) 0 max-card-message-lines)
+                  wrapped)
+        final (if truncated?
+                (conj (pop visible)
+                      (str (substr-by-width (peek visible)
+                                            (dec content-width))
+                           "…"))
+                visible)]
+    (mapv (fn [line] (str sel-start "  │ " line sel-end)) final)))
 
 (defn- format-session-card
   "Formats a single session as a compact card for narrow terminals."
@@ -98,12 +193,11 @@
         sel-end (if selected? ansi-reset "")
         line1 (card-line1 session selected? sel-start sel-end)
         line2 (card-line2 session sel-start sel-end content-width)
-        line3 (str sel-start
-                   "  │ "
-                   (truncate (:last-message session) content-width)
-                   sel-end)
-        line4 (str sel-start "  └─" sel-end)]
-    (str/join "\n" [line1 line2 line3 line4])))
+        msg-lines (card-message-lines
+                   (:last-message session) content-width
+                   sel-start sel-end)
+        line-end (str sel-start "  └─" sel-end)]
+    (str/join "\n" (concat [line1 line2] msg-lines [line-end]))))
 
 (defn- display-mode-label [display-mode]
   (case display-mode
