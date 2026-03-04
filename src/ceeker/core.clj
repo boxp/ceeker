@@ -104,10 +104,10 @@
     `(let [v# (volatile! nil)
            ex# (volatile! nil)
            f# (fn []
-                 (try
-                   (vreset! v# ~expr)
-                   (catch Throwable t#
-                     (vreset! ex# t#))))]
+                (try
+                  (vreset! v# ~expr)
+                  (catch Throwable t#
+                    (vreset! ex# t#))))]
        (doto (Thread. nil f# "ceeker-main")
          (.start)
          (.join))
