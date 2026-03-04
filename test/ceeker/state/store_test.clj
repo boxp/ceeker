@@ -335,3 +335,38 @@
         (is (= "active" (:last-message s1))))
       (finally
         (cleanup-dir dir)))))
+
+(deftest test-superseded-session-stays-closed
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "old"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id "%42"
+        :last-message "working"})
+      (store/update-session!
+       dir "new"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id "%42"
+        :last-message "resumed"})
+      ;; old is now superseded
+      (let [s (get-in (store/read-sessions dir)
+                      [:sessions "old"])]
+        (is (= :closed (:agent-status s)))
+        (is (= "superseded" (:last-message s))))
+      ;; delayed hook tries to set old back to running
+      (store/update-session!
+       dir "old"
+       {:agent-status :running
+        :last-message "delayed event"})
+      ;; old must stay closed
+      (let [s (get-in (store/read-sessions dir)
+                      [:sessions "old"])]
+        (is (= :closed (:agent-status s)))
+        (is (= "superseded" (:last-message s))))
+      (finally
+        (cleanup-dir dir)))))

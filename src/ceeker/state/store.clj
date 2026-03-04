@@ -163,10 +163,26 @@
      sessions session-id session-data now)
     sessions))
 
+(defn- superseded?
+  "Returns true if the session was auto-closed as superseded."
+  [session]
+  (and (= :closed (:agent-status session))
+       (= "superseded" (:last-message session))))
+
+(defn- merge-session-data
+  "Merges new data into existing session, but blocks
+   running updates on already-superseded sessions."
+  [existing session-data]
+  (if (and (superseded? existing)
+           (= :running (:agent-status session-data)))
+    existing
+    (merge existing session-data)))
+
 (defn update-session!
   "Updates a session in the state store.
    Supersedes running sessions with the same pane key
-   only for newly created running sessions."
+   only for newly created running sessions.
+   Ignores running updates for already-superseded sessions."
   ([session-id session-data]
    (update-session! (state-dir) session-id session-data))
   ([dir session-id session-data]
@@ -179,8 +195,9 @@
                sessions (maybe-supersede
                          (:sessions state)
                          session-id session-data now)
-               updated (merge (get sessions session-id {})
-                              session-data)]
+               existing (get sessions session-id {})
+               updated (merge-session-data
+                        existing session-data)]
            (write-state-file!
             path
             {:sessions
