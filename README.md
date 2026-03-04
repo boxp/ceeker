@@ -217,6 +217,26 @@ make lint
 make format
 ```
 
+## CI
+
+GitHub Actions で以下のジョブが PR / main push 時に実行されます:
+
+- **lint**: clj-kondo lint + cljfmt format-check
+- **test**: Clojure ユニットテスト
+- **native-e2e**: GraalVM native-image ビルド + E2E テスト
+
+### native-e2e
+
+native-image でビルドしたバイナリに対して E2E テストを実行し、JVM では再現しない native-image 固有の不具合を検出します。
+
+テスト内容:
+- `--help` 出力確認
+- hook コマンド (Claude / Codex) のセッション記録
+- TUI 起動・終了 (`q` キー)
+- TUI 検索モード (`/` → `Esc` → `q`)
+
+TUI テストは tmux を利用してターミナルを模擬します。
+
 ## ライセンス
 
 MIT
