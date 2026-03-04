@@ -203,15 +203,12 @@
 
 (defn- wait-for-input
   "Waits for key or file change, returns key or nil.
-   Returns nil after check-interval polls to allow periodic tasks."
+   Returns nil after a single 500ms poll to allow periodic tasks."
   [terminal w]
-  (loop [n 0]
-    (let [key (input/read-key terminal 500)]
-      (cond
-        (some? key) key
-        (or (nil? w) (watcher/poll-change w 0)
-            (>= n check-interval)) nil
-        :else (recur (inc n))))))
+  (let [key (input/read-key terminal 500)]
+    (cond
+      (some? key) key
+      :else (do (when w (watcher/poll-change w 0)) nil))))
 
 (defn- create-watcher-for
   "Creates a watcher for the given state dir.
