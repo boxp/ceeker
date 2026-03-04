@@ -143,13 +143,16 @@
 
 (defn- stale-session?
   "Returns true if the session is stale given pane state.
-   Conservative: returns false when liveness is unknown."
+   Conservative: returns false when liveness is unknown.
+   Skips process-tree check when session has no pane-id
+   (started outside tmux)."
   [session pane-cwds pane-infos]
   (and (seq (:cwd session))
        (if (not (contains? pane-cwds (:cwd session)))
          true
-         (= :dead (session-has-live-agent?
-                   session pane-infos)))))
+         (and (seq (:pane-id session))
+              (= :dead (session-has-live-agent?
+                        session pane-infos))))))
 
 (defn close-stale-sessions!
   "Checks running sessions and marks stale ones as closed.
