@@ -10,7 +10,40 @@ AI Coding Agent セッション・進捗モニタリングTUI。
 
 ## インストール
 
-[Releases](https://github.com/boxp/ceeker/releases) からプラットフォームに合ったバイナリをダウンロード:
+### Homebrew（macOS / Linux）
+
+```bash
+brew tap boxp/tap
+brew install ceeker
+```
+
+アップデート:
+
+```bash
+brew upgrade ceeker
+```
+
+### tarball から直接インストール
+
+[Releases](https://github.com/boxp/ceeker/releases) からプラットフォームに合った tarball をダウンロード:
+
+```bash
+# 例: macOS ARM64
+curl -L -o ceeker.tar.gz https://github.com/boxp/ceeker/releases/latest/download/ceeker-darwin-arm64.tar.gz
+tar xzf ceeker.tar.gz
+chmod +x ceeker-darwin-arm64
+sudo mv ceeker-darwin-arm64 /usr/local/bin/ceeker
+```
+
+```bash
+# 例: Linux amd64
+curl -L -o ceeker.tar.gz https://github.com/boxp/ceeker/releases/latest/download/ceeker-linux-amd64.tar.gz
+tar xzf ceeker.tar.gz
+chmod +x ceeker-linux-amd64
+sudo mv ceeker-linux-amd64 /usr/local/bin/ceeker
+```
+
+### raw binary から直接インストール
 
 ```bash
 # 例: Linux amd64

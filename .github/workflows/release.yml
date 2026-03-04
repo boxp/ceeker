@@ -79,6 +79,8 @@ jobs:
             name=$(basename "$dir")
             cp "$dir/$name" "release/$name"
             chmod +x "release/$name"
+            # Create tarball for Homebrew / package managers
+            tar czf "release/${name}.tar.gz" -C "$dir" "$name"
           done
 
       - name: Generate checksums
