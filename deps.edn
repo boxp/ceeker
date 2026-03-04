@@ -4,7 +4,8 @@
         org.clojure/tools.cli {:mvn/version "1.1.230"}
         cheshire/cheshire {:mvn/version "5.13.0"}
         org.jline/jline {:mvn/version "3.26.3"
-                         :exclusions [org.jline/jline-native]}}
+                         :exclusions [org.jline/jline-native]}
+        com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
 
  :aliases
  {:run {:main-opts ["-m" "ceeker.core"]}
@@ -26,6 +27,5 @@
   :format-fix {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.0"}}
                :main-opts ["-m" "cljfmt.main" "fix" "src" "test"]}
 
-  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}
-                  com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
           :ns-default build}}}
