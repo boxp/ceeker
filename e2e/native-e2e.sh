@@ -15,6 +15,12 @@ PASS=0
 FAIL=0
 ERRORS=""
 
+# Timeouts (seconds) - native-image binaries may have slow first-run
+# due to class initialization and subprocess spawning in GraalVM.
+TUI_READY_TIMEOUT=90
+TUI_EXIT_TIMEOUT=30
+SEARCH_POLL_TIMEOUT=15
+
 cleanup() {
   tmux kill-session -t ceeker-e2e 2>/dev/null || true
   rm -rf "$TMPDIR_E2E"
@@ -34,24 +40,53 @@ collect_diagnostics() {
   local test_dir="${DIAG_DIR}/${test_name}"
   mkdir -p "$test_dir"
   tmux capture-pane -t ceeker-e2e -p > "$test_dir/tmux-capture.txt" 2>/dev/null || true
+  # Check if binary process is still running
+  tmux list-panes -t ceeker-e2e -F '#{pane_pid} #{pane_dead}' > "$test_dir/tmux-pane-info.txt" 2>/dev/null || true
   cp -r "${TMPDIR_E2E}/state/" "$test_dir/state/" 2>/dev/null || true
+  cp -r "${TMPDIR_E2E}/ceeker/" "$test_dir/ceeker-state/" 2>/dev/null || true
   cp "${TMPDIR_E2E}/"*.stderr "$test_dir/" 2>/dev/null || true
+  echo "--- Diagnostics for $test_name ---"
+  echo "tmux pane capture:"
+  cat "$test_dir/tmux-capture.txt" 2>/dev/null || echo "(empty)"
+  echo "stderr:"
+  cat "$test_dir/"*.stderr 2>/dev/null || echo "(empty)"
+  echo "---"
 }
 
 # Wait for TUI to render by polling tmux capture-pane for the "ceeker" header.
-# Falls back to fixed sleep after timeout.
 wait_for_tui_ready() {
   local waited=0
-  local max_wait=15
-  while [ "$waited" -lt "$max_wait" ]; do
+  while [ "$waited" -lt "$TUI_READY_TIMEOUT" ]; do
+    # Check if tmux session is still alive
+    if ! tmux has-session -t ceeker-e2e 2>/dev/null; then
+      echo "  [diag] tmux session died at ${waited}s"
+      return 1
+    fi
     if tmux capture-pane -t ceeker-e2e -p 2>/dev/null | grep -q "ceeker"; then
+      echo "  [diag] TUI ready after ${waited}s"
       return 0
+    fi
+    # Log progress every 15 seconds
+    if [ "$((waited % 15))" -eq 0 ] && [ "$waited" -gt 0 ]; then
+      echo "  [diag] still waiting for TUI... (${waited}s)"
+      tmux capture-pane -t ceeker-e2e -p 2>/dev/null | head -3 || true
     fi
     sleep 1
     waited=$((waited + 1))
   done
-  # TUI may still be usable even if header not detected
-  return 0
+  echo "  [diag] TUI not ready after ${TUI_READY_TIMEOUT}s"
+  return 1
+}
+
+# Wait for exit marker file to appear
+wait_for_exit() {
+  local marker="$1"
+  local waited=0
+  while [ ! -f "$marker" ] && [ "$waited" -lt "$TUI_EXIT_TIMEOUT" ]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  [ -f "$marker" ]
 }
 
 # Require tmux to be installed
@@ -86,7 +121,12 @@ test_hook_claude() {
 
   local payload='{"session_id":"e2e-test-001","cwd":"/tmp/e2e","hook_event_name":"SessionStart"}'
 
+  local start_time
+  start_time="$(date +%s)"
   if echo "$payload" | XDG_RUNTIME_DIR="$TMPDIR_E2E" "$BINARY" hook claude SessionStart 2>"$stderr_file"; then
+    local end_time
+    end_time="$(date +%s)"
+    echo "  [diag] hook claude took $((end_time - start_time))s"
     local sessions_file
     sessions_file="$(find "$TMPDIR_E2E" -name 'sessions.edn' -type f 2>/dev/null | head -1)"
     if [ -n "$sessions_file" ] && grep -q "e2e-test-001" "$sessions_file"; then
@@ -108,7 +148,12 @@ test_hook_codex() {
 
   local payload='{"type":"agent-turn-complete","thread-id":"e2e-codex-001","cwd":"/tmp/e2e-codex","last-assistant-message":"Done testing."}'
 
+  local start_time
+  start_time="$(date +%s)"
   if XDG_RUNTIME_DIR="$TMPDIR_E2E" "$BINARY" hook codex "$payload" 2>"$stderr_file"; then
+    local end_time
+    end_time="$(date +%s)"
+    echo "  [diag] hook codex took $((end_time - start_time))s"
     local sessions_file
     sessions_file="$(find "$TMPDIR_E2E" -name 'sessions.edn' -type f 2>/dev/null | head -1)"
     if [ -n "$sessions_file" ] && grep -q "e2e-codex-001" "$sessions_file"; then
@@ -136,17 +181,23 @@ test_tui_start_quit() {
   tmux new-session -d -s ceeker-e2e -x 120 -y 40 \
     "XDG_RUNTIME_DIR='${TMPDIR_E2E}' '${BINARY}' 2>'${stderr_file}'; echo \$? > '${exit_marker}'"
 
-  wait_for_tui_ready
+  if ! wait_for_tui_ready; then
+    # TUI didn't start - check if process exited
+    if [ -f "$exit_marker" ]; then
+      local code
+      code="$(cat "$exit_marker")"
+      fail "TUI quit" "binary exited early with code $code"
+    else
+      fail "TUI quit" "TUI did not render within ${TUI_READY_TIMEOUT}s"
+    fi
+    collect_diagnostics "tui-quit"
+    tmux kill-session -t ceeker-e2e 2>/dev/null || true
+    return
+  fi
 
   tmux send-keys -t ceeker-e2e q
 
-  local waited=0
-  while [ ! -f "$exit_marker" ] && [ "$waited" -lt 15 ]; do
-    sleep 1
-    waited=$((waited + 1))
-  done
-
-  if [ -f "$exit_marker" ]; then
+  if wait_for_exit "$exit_marker"; then
     local code
     code="$(cat "$exit_marker")"
     if [ "$code" = "0" ]; then
@@ -156,7 +207,7 @@ test_tui_start_quit() {
       collect_diagnostics "tui-quit"
     fi
   else
-    fail "TUI quit" "timed out waiting for exit"
+    fail "TUI quit" "timed out waiting for exit after ${TUI_EXIT_TIMEOUT}s"
     collect_diagnostics "tui-quit"
     tmux kill-session -t ceeker-e2e 2>/dev/null || true
   fi
@@ -173,13 +224,24 @@ test_tui_search_escape() {
   tmux new-session -d -s ceeker-e2e -x 120 -y 40 \
     "XDG_RUNTIME_DIR='${TMPDIR_E2E}' '${BINARY}' 2>'${stderr_file}'; echo \$? > '${exit_marker}'"
 
-  wait_for_tui_ready
+  if ! wait_for_tui_ready; then
+    if [ -f "$exit_marker" ]; then
+      local code
+      code="$(cat "$exit_marker")"
+      fail "TUI search" "binary exited early with code $code"
+    else
+      fail "TUI search" "TUI did not render within ${TUI_READY_TIMEOUT}s"
+    fi
+    collect_diagnostics "tui-search"
+    tmux kill-session -t ceeker-e2e 2>/dev/null || true
+    return
+  fi
 
   # Enter search mode
   tmux send-keys -t ceeker-e2e /
   # Wait for search prompt to appear
   local sw=0
-  while [ "$sw" -lt 10 ]; do
+  while [ "$sw" -lt "$SEARCH_POLL_TIMEOUT" ]; do
     if tmux capture-pane -t ceeker-e2e -p 2>/dev/null | grep -q "Search:"; then
       break
     fi
@@ -191,7 +253,7 @@ test_tui_search_escape() {
   tmux send-keys -t ceeker-e2e Escape
   # Wait for search prompt to disappear
   local ew=0
-  while [ "$ew" -lt 10 ]; do
+  while [ "$ew" -lt "$SEARCH_POLL_TIMEOUT" ]; do
     if ! tmux capture-pane -t ceeker-e2e -p 2>/dev/null | grep -q "Search:"; then
       break
     fi
@@ -202,13 +264,7 @@ test_tui_search_escape() {
   # Quit
   tmux send-keys -t ceeker-e2e q
 
-  local waited=0
-  while [ ! -f "$exit_marker" ] && [ "$waited" -lt 15 ]; do
-    sleep 1
-    waited=$((waited + 1))
-  done
-
-  if [ -f "$exit_marker" ]; then
+  if wait_for_exit "$exit_marker"; then
     local code
     code="$(cat "$exit_marker")"
     if [ "$code" = "0" ]; then
@@ -218,7 +274,7 @@ test_tui_search_escape() {
       collect_diagnostics "tui-search"
     fi
   else
-    fail "TUI search" "timed out waiting for exit"
+    fail "TUI search" "timed out waiting for exit after ${TUI_EXIT_TIMEOUT}s"
     collect_diagnostics "tui-search"
     tmux kill-session -t ceeker-e2e 2>/dev/null || true
   fi
@@ -228,6 +284,7 @@ test_tui_search_escape() {
 log "Running ceeker native-image E2E tests"
 echo "  Binary: $BINARY"
 echo "  Temp dir: $TMPDIR_E2E"
+echo "  TUI ready timeout: ${TUI_READY_TIMEOUT}s"
 echo ""
 
 test_help
