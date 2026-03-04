@@ -120,10 +120,10 @@
       (is (contains? (first result) :pid)))))
 
 (deftest test-find-agent-in-tree-nonexistent-pid
-  (is (false? (pane/find-agent-in-tree
-               "999999999" :claude-code))))
+  (is (= :unknown (pane/find-agent-in-tree
+                   "999999999" :claude-code))))
 
 (deftest test-find-agent-in-tree-current-process
   (let [pid (str (.pid (java.lang.ProcessHandle/current)))]
-    (is (false? (pane/find-agent-in-tree
-                 pid :claude-code)))))
+    (is (= :not-found (pane/find-agent-in-tree
+                       pid :claude-code)))))

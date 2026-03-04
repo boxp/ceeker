@@ -84,41 +84,56 @@
 (defn find-agent-in-tree
   "Searches the process tree rooted at pid for an agent
    process matching the given agent-type.
-   Returns true if found, false otherwise.
-   Max depth prevents infinite recursion."
+   Returns :found, :not-found, or :unknown (when process
+   info is unavailable). Max depth prevents infinite loops."
   ([pid agent-type] (find-agent-in-tree pid agent-type 5))
   ([pid agent-type max-depth]
    (if (neg? max-depth)
-     false
+     :not-found
      (let [pat (agent-pattern agent-type)
            cmdline (read-proc-cmdline pid)]
-       (if (and cmdline (re-find pat cmdline))
-         true
+       (cond
+         (nil? cmdline) :unknown
+         (re-find pat cmdline) :found
+         :else
          (let [children (child-pids pid)]
-           (boolean
-            (some #(find-agent-in-tree
-                    % agent-type (dec max-depth))
-                  children))))))))
+           (if (nil? children)
+             :unknown
+             (let [results (map #(find-agent-in-tree
+                                  % agent-type
+                                  (dec max-depth))
+                                children)]
+               (cond
+                 (some #{:found} results) :found
+                 (some #{:unknown} results) :unknown
+                 :else :not-found)))))))))
 
 (defn- session-has-live-agent?
   "Checks if a session's agent is alive by searching the
-   process tree of matching tmux panes."
+   process tree of matching tmux panes.
+   Returns :alive, :dead, or :unknown."
   [session pane-infos]
   (let [cwd (:cwd session)
         agent-type (:agent-type session)
         matching-panes (filter #(= cwd (:cwd %))
-                               pane-infos)]
-    (boolean
-     (some #(find-agent-in-tree (:pid %) agent-type)
-           matching-panes))))
+                               pane-infos)
+        results (map #(find-agent-in-tree
+                       (:pid %) agent-type)
+                     matching-panes)]
+    (cond
+      (some #{:found} results) :alive
+      (some #{:unknown} results) :unknown
+      :else :dead)))
 
 (defn- stale-session?
-  "Returns true if the session is stale given pane state."
+  "Returns true if the session is stale given pane state.
+   Conservative: returns false when liveness is unknown."
   [session pane-cwds pane-infos]
   (and (seq (:cwd session))
-       (or (not (contains? pane-cwds (:cwd session)))
-           (not (session-has-live-agent?
-                 session pane-infos)))))
+       (if (not (contains? pane-cwds (:cwd session)))
+         true
+         (= :dead (session-has-live-agent?
+                   session pane-infos)))))
 
 (defn close-stale-sessions!
   "Checks running sessions and marks stale ones as closed.
