@@ -2,7 +2,7 @@
   (:require [ceeker.state.store :as store]
             [ceeker.tmux.pane :as pane]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is testing]]))
 
 (defn- temp-dir
   "Creates a temporary directory for testing."
@@ -117,7 +117,43 @@
     (is (or (nil? result) (sequential? result)))
     (when (seq result)
       (is (contains? (first result) :cwd))
-      (is (contains? (first result) :pid)))))
+      (is (contains? (first result) :pid))
+      (is (contains? (first result) :pane-id)))))
+
+;; --- parse-pane-line tests ---
+
+(deftest test-parse-pane-line-three-parts
+  (testing "Parses pid|pane-id|cwd correctly"
+    (let [parse (#'ceeker.tmux.pane/parse-pane-line
+                 "12345|||%0|||/home/user")]
+      (is (= "12345" (:pid parse)))
+      (is (= "%0" (:pane-id parse)))
+      (is (= "/home/user" (:cwd parse))))))
+
+(deftest test-parse-pane-line-two-parts-returns-nil
+  (testing "Two-part line returns nil (old format)"
+    (is (nil? (#'ceeker.tmux.pane/parse-pane-line
+               "12345|||/home/user")))))
+
+;; --- recently-updated? tests ---
+
+(deftest test-recently-updated-fresh
+  (testing "Session updated just now is recent"
+    (let [now (.toString (java.time.Instant/now))]
+      (is (true? (#'ceeker.tmux.pane/recently-updated?
+                  {:last-updated now}))))))
+
+(deftest test-recently-updated-old
+  (testing "Session updated long ago is not recent"
+    (let [old (.toString
+               (.minusSeconds (java.time.Instant/now) 60))]
+      (is (false? (#'ceeker.tmux.pane/recently-updated?
+                   {:last-updated old}))))))
+
+(deftest test-recently-updated-nil
+  (testing "No timestamp returns false"
+    (is (false? (#'ceeker.tmux.pane/recently-updated?
+                 {:last-updated nil})))))
 
 (deftest test-find-agent-in-tree-nonexistent-pid
   (is (= :unknown (pane/find-agent-in-tree

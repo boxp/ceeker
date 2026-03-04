@@ -14,10 +14,13 @@
   20)
 
 (defn- maybe-check-panes!
-  "Runs pane liveness check when tick is due."
+  "Runs pane liveness check and state refresh when tick
+   is due. Combines stale detection with capture-pane
+   based intermediate state updates."
   [tick state-dir]
   (when (zero? (mod tick check-interval))
-    (pane/close-stale-sessions! state-dir)))
+    (pane/close-stale-sessions! state-dir)
+    (pane/refresh-session-states! state-dir)))
 
 (defn- get-session-list
   "Gets session list from state store."
