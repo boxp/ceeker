@@ -368,5 +368,15 @@
                       [:sessions "old"])]
         (is (= :closed (:agent-status s)))
         (is (= "superseded" (:last-message s))))
+      ;; even a non-running update should not clear
+      ;; superseded state
+      (store/update-session!
+       dir "old"
+       {:agent-status :completed
+        :last-message "stop event"})
+      (let [s (get-in (store/read-sessions dir)
+                      [:sessions "old"])]
+        (is (= :closed (:agent-status s)))
+        (is (= "superseded" (:last-message s))))
       (finally
         (cleanup-dir dir)))))

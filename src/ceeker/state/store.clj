@@ -141,6 +141,7 @@
                 (merge session
                        {:agent-status :closed
                         :last-message "superseded"
+                        :superseded true
                         :last-updated now})
                 session)))
      {}
@@ -164,17 +165,15 @@
     sessions))
 
 (defn- superseded?
-  "Returns true if the session was auto-closed as superseded."
+  "Returns true if the session was marked as superseded."
   [session]
-  (and (= :closed (:agent-status session))
-       (= "superseded" (:last-message session))))
+  (:superseded session))
 
 (defn- merge-session-data
-  "Merges new data into existing session, but blocks
-   running updates on already-superseded sessions."
+  "Merges new data into existing session.
+   Blocks all updates on superseded sessions."
   [existing session-data]
-  (if (and (superseded? existing)
-           (= :running (:agent-status session-data)))
+  (if (superseded? existing)
     existing
     (merge existing session-data)))
 
@@ -200,9 +199,10 @@
                         existing session-data)]
            (write-state-file!
             path
-            {:sessions
-             (assoc sessions
-                    session-id updated)})))))))
+            (assoc state :sessions
+                   (assoc sessions
+                          session-id updated)))))))))
+
 
 (defn remove-session!
   "Removes a session from the state store."
@@ -267,7 +267,7 @@
                         pane-cwds now)]
            (write-state-file!
             path
-            {:sessions updated})))))))
+            (assoc state :sessions updated))))))))
 
 (defn- apply-stale-pred
   "Returns updated sessions map, closing running sessions
@@ -303,4 +303,4 @@
                         stale-pred now)]
            (write-state-file!
             path
-            {:sessions updated})))))))
+            (assoc state :sessions updated))))))))
