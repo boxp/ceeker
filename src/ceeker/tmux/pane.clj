@@ -1,7 +1,9 @@
 (ns ceeker.tmux.pane
   "tmux pane liveness checking.
-   Detects stale sessions by checking tmux pane existence."
+   Detects stale sessions by checking tmux pane existence
+   and agent process liveness in the process tree."
   (:require [ceeker.state.store :as store]
+            [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
 
@@ -19,12 +21,152 @@
                       (:out result))))))
     (catch Exception _ nil)))
 
+(def ^:private pane-separator "|||")
+
+(def ^:private pane-sep-re
+  "Compiled regex for splitting pane info lines."
+  (re-pattern
+   (java.util.regex.Pattern/quote pane-separator)))
+
+(defn- parse-pane-line
+  "Parses a pane info line into a map with :cwd and :pid.
+   PID comes first (digits only), path second (may contain
+   the separator in rare cases, handled by split limit)."
+  [line]
+  (let [parts (str/split line pane-sep-re 2)]
+    (when (= 2 (count parts))
+      {:pid (first parts) :cwd (second parts)})))
+
+(defn list-pane-info
+  "Returns a list of maps with :cwd and :pid for each pane.
+   Returns empty list when tmux has no panes.
+   Returns nil only if tmux is unavailable."
+  []
+  (try
+    (let [fmt (str "#{pane_pid}"
+                   pane-separator "#{pane_current_path}")
+          result (shell/sh
+                  "tmux" "list-panes" "-a"
+                  "-F" fmt)]
+      (when (zero? (:exit result))
+        (vec (keep parse-pane-line
+                   (str/split-lines
+                    (:out result))))))
+    (catch Exception _ nil)))
+
+(defn- read-proc-cmdline
+  "Reads /proc/<pid>/cmdline on Linux, falls back to ps on
+   macOS. Returns the command string or nil on failure."
+  [pid]
+  (try
+    (let [f (io/file (str "/proc/" pid "/cmdline"))]
+      (if (.exists f)
+        (str/replace (slurp f) "\0" " ")
+        (let [result (shell/sh
+                      "ps" "-p" (str pid) "-o"
+                      "command=")]
+          (when (zero? (:exit result))
+            (str/trim (:out result))))))
+    (catch Exception _ nil)))
+
+(defn- child-pids
+  "Returns direct child PIDs of the given pid via /proc.
+   Falls back to pgrep on non-Linux. Returns empty list
+   when no children exist, nil only on unexpected errors."
+  [pid]
+  (try
+    (let [f (io/file (str "/proc/" pid "/task/"
+                          pid "/children"))]
+      (if (.exists f)
+        (remove str/blank?
+                (str/split (str/trim (slurp f)) #"\s+"))
+        (let [result (shell/sh
+                      "pgrep" "-P" (str pid))]
+          (if (zero? (:exit result))
+            (remove str/blank?
+                    (str/split-lines
+                     (:out result)))
+            ()))))
+    (catch Exception _ nil)))
+
+(defn- agent-pattern
+  "Returns a regex pattern matching the agent type name."
+  [agent-type]
+  (case agent-type
+    :claude-code #"(?i)claude"
+    :codex #"(?i)codex"
+    #"(?i)claude|codex"))
+
+(defn find-agent-in-tree
+  "Searches the process tree rooted at pid for an agent
+   process matching the given agent-type.
+   Returns :found, :not-found, or :unknown (when process
+   info is unavailable). Max depth prevents infinite loops."
+  ([pid agent-type] (find-agent-in-tree pid agent-type 5))
+  ([pid agent-type max-depth]
+   (if (neg? max-depth)
+     :not-found
+     (let [pat (agent-pattern agent-type)
+           cmdline (read-proc-cmdline pid)]
+       (cond
+         (nil? cmdline) :unknown
+         (re-find pat cmdline) :found
+         :else
+         (let [children (child-pids pid)]
+           (if (nil? children)
+             :unknown
+             (let [results (map #(find-agent-in-tree
+                                  % agent-type
+                                  (dec max-depth))
+                                children)]
+               (cond
+                 (some #{:found} results) :found
+                 (some #{:unknown} results) :unknown
+                 :else :not-found)))))))))
+
+(defn- session-has-live-agent?
+  "Checks if a session's agent is alive by searching the
+   process tree of matching tmux panes.
+   Returns :alive, :dead, or :unknown."
+  [session pane-infos]
+  (let [cwd (:cwd session)
+        agent-type (:agent-type session)
+        matching-panes (filter #(= cwd (:cwd %))
+                               pane-infos)
+        results (map #(find-agent-in-tree
+                       (:pid %) agent-type)
+                     matching-panes)]
+    (cond
+      (some #{:found} results) :alive
+      (some #{:unknown} results) :unknown
+      :else :dead)))
+
+(defn- stale-session?
+  "Returns true if the session is stale given pane state.
+   Conservative: returns false when liveness is unknown.
+   Skips process-tree check when session has no pane-id
+   (started outside tmux)."
+  [session pane-cwds pane-infos]
+  (and (seq (:cwd session))
+       (if (not (contains? pane-cwds (:cwd session)))
+         true
+         (and (seq (:pane-id session))
+              (= :dead (session-has-live-agent?
+                        session pane-infos))))))
+
 (defn close-stale-sessions!
   "Checks running sessions and marks stale ones as closed.
-   Does nothing if tmux is unavailable."
+   Atomically updates all stale sessions under file lock.
+   Does nothing if tmux is unavailable (nil)."
   ([] (close-stale-sessions! nil))
   ([state-dir]
-   (when-let [pane-cwds (list-pane-cwds)]
-     (if state-dir
-       (store/close-stale-sessions! state-dir pane-cwds)
-       (store/close-stale-sessions! pane-cwds)))))
+   (let [pane-infos (list-pane-info)]
+     (when (some? pane-infos)
+       (let [pane-cwds (set (map :cwd pane-infos))
+             pred (fn [_sid session]
+                    (stale-session?
+                     session pane-cwds pane-infos))]
+         (if state-dir
+           (store/close-sessions-by-pred!
+            state-dir pred)
+           (store/close-sessions-by-pred! pred)))))))

@@ -356,3 +356,18 @@
                     "not json")))
       (finally
         (cleanup-dir dir)))))
+
+;; --- Pane ID tests (D: Agent ID + Pane Fallback) ---
+
+(deftest test-session-includes-pane-id
+  (let [result (handler/normalize-event
+                "claude" "SessionStart"
+                {:session_id "pane-test-1"
+                 :cwd "/tmp/work"
+                 :hook_event_name "SessionStart"})]
+    (is (contains? result :pane-id))
+    (is (string? (:pane-id result)))))
+
+(deftest test-current-pane-id-returns-string
+  (let [pane-id (handler/current-pane-id)]
+    (is (string? pane-id))))

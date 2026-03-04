@@ -109,3 +109,21 @@
         (is (= :running (:agent-status s2))))
       (finally
         (cleanup-dir dir)))))
+
+;; --- Process tree liveness tests (C) ---
+
+(deftest test-list-pane-info-returns-nil-or-list
+  (let [result (pane/list-pane-info)]
+    (is (or (nil? result) (sequential? result)))
+    (when (seq result)
+      (is (contains? (first result) :cwd))
+      (is (contains? (first result) :pid)))))
+
+(deftest test-find-agent-in-tree-nonexistent-pid
+  (is (= :unknown (pane/find-agent-in-tree
+                   "999999999" :claude-code))))
+
+(deftest test-find-agent-in-tree-current-process
+  (let [pid (str (.pid (java.lang.ProcessHandle/current)))]
+    (is (= :not-found (pane/find-agent-in-tree
+                       pid :claude-code)))))
