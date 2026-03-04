@@ -41,13 +41,18 @@
     (catch Exception _ nil)))
 
 (defn- read-proc-cmdline
-  "Reads /proc/<pid>/cmdline, returns the command string.
-   Returns nil on failure."
+  "Reads /proc/<pid>/cmdline on Linux, falls back to ps on
+   macOS. Returns the command string or nil on failure."
   [pid]
   (try
     (let [f (io/file (str "/proc/" pid "/cmdline"))]
-      (when (.exists f)
-        (str/replace (slurp f) "\0" " ")))
+      (if (.exists f)
+        (str/replace (slurp f) "\0" " ")
+        (let [result (shell/sh
+                      "ps" "-p" (str pid) "-o"
+                      "command=")]
+          (when (zero? (:exit result))
+            (str/trim (:out result))))))
     (catch Exception _ nil)))
 
 (defn- child-pids

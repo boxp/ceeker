@@ -311,3 +311,27 @@
         (is (= :completed (:agent-status s1))))
       (finally
         (cleanup-dir dir)))))
+
+(deftest test-supersede-non-running-update-no-close
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "s1"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id "%42"
+        :last-message "active"})
+      (store/update-session!
+       dir "s2"
+       {:agent-type :claude-code
+        :agent-status :completed
+        :cwd "/tmp/work"
+        :pane-id "%42"
+        :last-message "done"})
+      (let [state (store/read-sessions dir)
+            s1 (get-in state [:sessions "s1"])]
+        (is (= :running (:agent-status s1)))
+        (is (= "active" (:last-message s1))))
+      (finally
+        (cleanup-dir dir)))))

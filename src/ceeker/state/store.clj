@@ -147,9 +147,16 @@
      sessions)
     sessions))
 
+(defn- should-supersede?
+  "Returns true if the incoming session data represents
+   a running session that should trigger superseding."
+  [session-data]
+  (= :running (:agent-status session-data)))
+
 (defn update-session!
   "Updates a session in the state store.
-   Supersedes running sessions with the same pane key."
+   Supersedes running sessions with the same pane key
+   only when the incoming session is in running state."
   ([session-id session-data]
    (update-session! (state-dir) session-id session-data))
   ([dir session-id session-data]
@@ -159,15 +166,18 @@
        (fn []
          (let [state (read-state-file path)
                now (.toString (java.time.Instant/now))
-               superseded (supersede-old-sessions
+               sessions (if (should-supersede?
+                             session-data)
+                          (supersede-old-sessions
                            (:sessions state)
                            session-id session-data now)
-               existing (get superseded session-id {})
+                          (:sessions state))
+               existing (get sessions session-id {})
                updated (merge existing session-data)]
            (write-state-file!
             path
             {:sessions
-             (assoc superseded
+             (assoc sessions
                     session-id updated)})))))))
 
 (defn remove-session!
