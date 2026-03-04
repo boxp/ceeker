@@ -13,13 +13,10 @@
 
 (defn- parse-hook-payload
   "Parses JSON hook payload from stdin string.
-   Returns nil if input is empty or invalid."
+   Returns nil if input is empty, otherwise parsed map."
   [input]
   (when (and input (seq (str/trim input)))
-    (try
-      (json/parse-string input true)
-      (catch Exception _
-        nil))))
+    (json/parse-string input true)))
 
 (defn- make-session
   "Creates a normalized session state map."
