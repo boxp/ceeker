@@ -58,15 +58,24 @@
                    (str/trim (:err result)))})))
 
 (defn- tmux-jump!
-  "Jumps to the tmux pane for the given session."
+  "Jumps to the tmux pane for the given session.
+   Prefers pane-id for exact targeting, falls back to cwd search."
   [session]
-  (let [cwd (:cwd session)]
-    (when (seq cwd)
+  (let [pane-id (:pane-id session)
+        cwd (:cwd session)]
+    (when (or (seq pane-id) (seq cwd))
       (try
-        (if-let [target (find-tmux-pane cwd)]
-          (switch-tmux-pane! target)
-          {:success false
-           :error (str "No pane for: " cwd)})
+        (let [pane-result (when (seq pane-id)
+                            (switch-tmux-pane! pane-id))]
+          (if (and pane-result (:success pane-result))
+            pane-result
+            (if (seq cwd)
+              (if-let [target (find-tmux-pane cwd)]
+                (switch-tmux-pane! target)
+                {:success false
+                 :error (str "No pane for: " cwd)})
+              {:success false
+               :error "No pane found"})))
         (catch Exception e
           {:success false :error (.getMessage e)})))))
 
