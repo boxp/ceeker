@@ -29,15 +29,11 @@ q押下 → read-key → \q
 - TUI終了後に `(System/exit 0)` を呼び出し、JVMを確実に終了させる
 - `--help` や `errors` パスでは既に `System/exit` が呼ばれていた（一貫性の確保）
 
-### 2. `app.clj` (start-tui!)
-- finally ブロックで `(shutdown-agents)` を呼び出し、Clojureのスレッドプールを停止
-- `System/exit` の前にgracefulなクリーンアップを行う層として機能
-
-### 3. テスト追加 (app_test.clj)
+### 2. テスト追加 (app_test.clj)
 - `test-handle-normal-key-q-propagates-quit`: handle-normal-key → next-loop-state のエンドツーエンドテスト
 - `test-process-key-q-in-normal-mode`: 通常モードで process-key が quit を返すことを確認
 - `test-process-key-q-in-search-mode`: 検索モードでは q が終了ではなくバッファに入ることを確認
 
 ## 既知制約
 - 検索モード中は `q` が検索文字として扱われる（設計通り、ESCで検索終了してからqを押す）
-- `shutdown-agents` はグローバル操作だが、TUI終了時点で保留中のagent操作は存在しない
+- `shutdown-agents` はREPL/テスト環境で副作用があるため使用せず、`System/exit 0` のみで対応
