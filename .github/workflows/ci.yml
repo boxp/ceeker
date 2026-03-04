@@ -6,7 +6,9 @@ on:
     paths:
       - 'src/**'
       - 'test/**'
+      - 'e2e/**'
       - 'deps.edn'
+      - 'build.clj'
       - '.clj-kondo/**'
       - '.github/workflows/ci.yml'
   pull_request:
@@ -14,7 +16,9 @@ on:
     paths:
       - 'src/**'
       - 'test/**'
+      - 'e2e/**'
       - 'deps.edn'
+      - 'build.clj'
       - '.clj-kondo/**'
       - '.github/workflows/ci.yml'
 
@@ -63,3 +67,57 @@ jobs:
 
       - name: Test
         run: clojure -M:test
+
+  native-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          native-image-job-reports: 'true'
+
+      - uses: DeLaGuardo/setup-clojure@13.1
+        with:
+          cli: latest
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.clojure/.cpcache
+          key: ${{ runner.os }}-clojure-native-${{ hashFiles('deps.edn') }}
+          restore-keys: ${{ runner.os }}-clojure-native-
+
+      - name: Build uberjar
+        run: clojure -T:build uber
+
+      - name: Build native image
+        run: |
+          native-image \
+            -jar target/ceeker.jar \
+            -o ceeker \
+            --no-fallback \
+            --initialize-at-build-time \
+            --initialize-at-run-time=org.jline.nativ \
+            -H:+ReportExceptionStackTraces
+
+      - name: Install tmux
+        run: sudo apt-get install -y tmux
+
+      - name: Run native E2E tests
+        run: |
+          chmod +x e2e/native-e2e.sh
+          ./e2e/native-e2e.sh ./ceeker
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-e2e-diagnostics
+          path: e2e-diagnostics/
+          retention-days: 7
