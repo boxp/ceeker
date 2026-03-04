@@ -139,7 +139,7 @@
 (defn- footer-line [display-mode search-mode? search-buf]
   (if search-mode?
     (str ansi-cyan "  Search: " (or search-buf "") "▌"
-         ansi-dim "  [Enter] Apply  [Esc] Cancel"
+         ansi-dim "  [Enter] Done  [Esc] Clear"
          "  [v] View:" (display-mode-label display-mode)
          ansi-reset)
     (str ansi-dim

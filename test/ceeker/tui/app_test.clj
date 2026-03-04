@@ -4,7 +4,7 @@
             [clojure.test :refer [deftest is testing]]))
 
 (deftest test-handle-search-key-backspace-delete
-  (testing "delete/backspace removes the last character"
+  (testing "delete/backspace removes last char and applies filter"
     (let [filter-state f/empty-filter
           result-delete (#'ceeker.tui.app/handle-search-key
                          \u007f "abc" filter-state)
@@ -12,11 +12,19 @@
                             \backspace "abc" filter-state)]
       (is (= "ab" (:sb result-delete)))
       (is (= "ab" (:sb result-backspace)))
-      (is (= filter-state (:fs result-delete)))
-      (is (= filter-state (:fs result-backspace))))))
+      (is (= "ab" (get-in result-delete [:fs :search-query])))
+      (is (= "ab" (get-in result-backspace [:fs :search-query]))))))
+
+(deftest test-handle-search-key-backspace-empty
+  (testing "backspace on empty buffer clears search query"
+    (let [filter-state (f/set-search-query f/empty-filter "old")
+          result (#'ceeker.tui.app/handle-search-key
+                  \u007f "" filter-state)]
+      (is (nil? (:sb result)))
+      (is (nil? (get-in result [:fs :search-query]))))))
 
 (deftest test-handle-search-key-enter-commits-query
-  (testing "enter exits search mode and applies query"
+  (testing "enter exits search mode and keeps current filter"
     (let [filter-state f/empty-filter
           result (#'ceeker.tui.app/handle-search-key
                   :enter "hello" filter-state)]
@@ -24,11 +32,40 @@
       (is (nil? (:sb result)))
       (is (= "hello" (get-in result [:fs :search-query]))))))
 
-(deftest test-handle-search-key-escape-cancels
-  (testing "escape exits search mode without changing filters"
+(deftest test-handle-search-key-escape-clears
+  (testing "escape exits search mode and clears search query"
     (let [filter-state (assoc f/empty-filter :search-query "old")
           result (#'ceeker.tui.app/handle-search-key
                   :escape "new" filter-state)]
       (is (false? (:sm? result)))
       (is (nil? (:sb result)))
-      (is (= filter-state (:fs result))))))
+      (is (nil? (get-in result [:fs :search-query]))))))
+
+(deftest test-handle-search-key-char-applies-filter
+  (testing "typing a character applies filter immediately"
+    (let [filter-state f/empty-filter
+          result (#'ceeker.tui.app/handle-search-key
+                  \x "ab" filter-state)]
+      (is (true? (:sm? result)))
+      (is (= "abx" (:sb result)))
+      (is (= "abx" (get-in result [:fs :search-query]))))))
+
+(deftest test-nav-key-q-returns-quit
+  (testing "q key returns explicit quit signal"
+    (let [result (#'ceeker.tui.app/nav-key-result
+                  \q 0 5 [] f/empty-filter :auto)]
+      (is (true? (:quit result))))))
+
+(deftest test-next-loop-state-quit
+  (testing "quit result returns nil to exit loop"
+    (let [result (#'ceeker.tui.app/next-loop-state
+                  {:quit true} 0 f/empty-filter
+                  false nil :auto)]
+      (is (nil? result)))))
+
+(deftest test-next-loop-state-idle
+  (testing "idle result preserves current state"
+    (let [result (#'ceeker.tui.app/next-loop-state
+                  {:idle true} 2 f/empty-filter
+                  false nil :table)]
+      (is (= [2 nil f/empty-filter false nil :table] result)))))
