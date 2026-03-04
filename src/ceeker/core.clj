@@ -100,4 +100,6 @@
       (handle-hook-command (rest arguments))
 
       :else
-      (tui/start-tui!))))
+      (do
+        (tui/start-tui!)
+        (System/exit 0)))))

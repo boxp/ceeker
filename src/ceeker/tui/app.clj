@@ -271,4 +271,5 @@
          (print "\033[2J\033[H")
          (flush)
          (watcher/close-watcher w)
-         (input/close-terminal terminal))))))
+         (input/close-terminal terminal)
+         (shutdown-agents))))))
