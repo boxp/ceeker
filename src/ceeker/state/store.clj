@@ -153,10 +153,20 @@
   [session-data]
   (= :running (:agent-status session-data)))
 
+(defn- maybe-supersede
+  "Applies supersede if session is new and running.
+   Returns the sessions map after potential supersede."
+  [sessions session-id session-data now]
+  (if (and (should-supersede? session-data)
+           (not (contains? sessions session-id)))
+    (supersede-old-sessions
+     sessions session-id session-data now)
+    sessions))
+
 (defn update-session!
   "Updates a session in the state store.
    Supersedes running sessions with the same pane key
-   only when the incoming session is in running state."
+   only for newly created running sessions."
   ([session-id session-data]
    (update-session! (state-dir) session-id session-data))
   ([dir session-id session-data]
@@ -166,14 +176,11 @@
        (fn []
          (let [state (read-state-file path)
                now (.toString (java.time.Instant/now))
-               sessions (if (should-supersede?
-                             session-data)
-                          (supersede-old-sessions
-                           (:sessions state)
-                           session-id session-data now)
-                          (:sessions state))
-               existing (get sessions session-id {})
-               updated (merge existing session-data)]
+               sessions (maybe-supersede
+                         (:sessions state)
+                         session-id session-data now)
+               updated (merge (get sessions session-id {})
+                              session-data)]
            (write-state-file!
             path
             {:sessions

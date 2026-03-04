@@ -57,7 +57,8 @@
 
 (defn- child-pids
   "Returns direct child PIDs of the given pid via /proc.
-   Returns empty seq on failure."
+   Falls back to pgrep on non-Linux. Returns empty list
+   when no children exist, nil only on unexpected errors."
   [pid]
   (try
     (let [f (io/file (str "/proc/" pid "/task/"
@@ -67,10 +68,11 @@
                 (str/split (str/trim (slurp f)) #"\s+"))
         (let [result (shell/sh
                       "pgrep" "-P" (str pid))]
-          (when (zero? (:exit result))
+          (if (zero? (:exit result))
             (remove str/blank?
                     (str/split-lines
-                     (:out result)))))))
+                     (:out result)))
+            ()))))
     (catch Exception _ nil)))
 
 (defn- agent-pattern
