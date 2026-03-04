@@ -170,3 +170,144 @@
         (is (= :running (:agent-status s1))))
       (finally
         (cleanup-dir dir)))))
+
+;; --- Supersede-per-Key tests (B) ---
+
+(deftest test-supersede-closes-old-session
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "old-session"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id "%42"
+        :last-message "working"})
+      (store/update-session!
+       dir "new-session"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id "%42"
+        :last-message "resumed"})
+      (let [state (store/read-sessions dir)
+            old (get-in state [:sessions "old-session"])
+            new (get-in state [:sessions "new-session"])]
+        (is (= :closed (:agent-status old)))
+        (is (= "superseded" (:last-message old)))
+        (is (= :running (:agent-status new))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-supersede-different-pane-no-close
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "s1"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id "%42"})
+      (store/update-session!
+       dir "s2"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id "%99"})
+      (let [state (store/read-sessions dir)
+            s1 (get-in state [:sessions "s1"])
+            s2 (get-in state [:sessions "s2"])]
+        (is (= :running (:agent-status s1)))
+        (is (= :running (:agent-status s2))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-supersede-different-cwd-no-close
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "s1"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work-a"
+        :pane-id "%42"})
+      (store/update-session!
+       dir "s2"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work-b"
+        :pane-id "%42"})
+      (let [state (store/read-sessions dir)
+            s1 (get-in state [:sessions "s1"])
+            s2 (get-in state [:sessions "s2"])]
+        (is (= :running (:agent-status s1)))
+        (is (= :running (:agent-status s2))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-supersede-different-agent-no-close
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "s1"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id "%42"})
+      (store/update-session!
+       dir "s2"
+       {:agent-type :codex
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id "%42"})
+      (let [state (store/read-sessions dir)
+            s1 (get-in state [:sessions "s1"])
+            s2 (get-in state [:sessions "s2"])]
+        (is (= :running (:agent-status s1)))
+        (is (= :running (:agent-status s2))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-supersede-empty-pane-id-no-close
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "s1"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id ""})
+      (store/update-session!
+       dir "s2"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id ""})
+      (let [state (store/read-sessions dir)
+            s1 (get-in state [:sessions "s1"])
+            s2 (get-in state [:sessions "s2"])]
+        (is (= :running (:agent-status s1)))
+        (is (= :running (:agent-status s2))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-supersede-completed-not-closed
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "s1"
+       {:agent-type :claude-code
+        :agent-status :completed
+        :cwd "/tmp/work"
+        :pane-id "%42"})
+      (store/update-session!
+       dir "s2"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id "%42"})
+      (let [state (store/read-sessions dir)
+            s1 (get-in state [:sessions "s1"])]
+        (is (= :completed (:agent-status s1))))
+      (finally
+        (cleanup-dir dir)))))

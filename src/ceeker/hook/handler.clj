@@ -18,6 +18,12 @@
   (when (and input (seq (str/trim input)))
     (json/parse-string input true)))
 
+(defn current-pane-id
+  "Returns the current tmux pane ID from $TMUX_PANE,
+   or empty string if not in tmux."
+  []
+  (or (System/getenv "TMUX_PANE") ""))
+
 (defn- make-session
   "Creates a normalized session state map."
   [session-id agent-type status cwd message]
@@ -25,6 +31,7 @@
    :agent-type agent-type
    :agent-status status
    :cwd cwd
+   :pane-id (current-pane-id)
    :last-message message
    :last-updated (current-timestamp)})
 

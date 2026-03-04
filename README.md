@@ -146,7 +146,28 @@ tmuxペインが終了すると、対応するセッションは自動的に `Cl
 
 **仕組み:**
 
-`tmux list-panes -a` を1回実行して全ペインのcwdを取得し、`running` 状態のセッションのcwdと照合します。一致するペインがない場合、セッションは `closed` に遷移します。tmuxが利用できない場合はチェックをスキップします。
+`tmux list-panes -a` を1回実行して全ペインのcwdとPIDを取得し、`running` 状態のセッションと照合します。以下の条件でセッションは `closed` に遷移します:
+
+1. **ペイン不在**: セッションのcwdに一致するtmuxペインが存在しない
+2. **プロセスツリー探索**: cwdが一致するペインが存在しても、そのペインのプロセスツリー内に対象エージェント（claude/codex）のプロセスが見つからない場合
+
+tmuxが利用できない場合はチェックをスキップします。
+
+### セッション重複防止（Supersede-per-Key）
+
+同一tmuxペインでエージェントをclose/resumeしたとき、旧セッションが `Running` のまま残って増殖する問題を防止します。
+
+**動作:**
+
+- hookイベント受信時、`$TMUX_PANE` 環境変数からペインIDを取得
+- 新セッション登録時、同一キー `(pane-id, agent-type, cwd)` を持つ既存の `running` セッションを自動的に `closed`（superseded）に遷移
+- `$TMUX_PANE` が利用できない場合（tmux外など）はsupersede判定をスキップ
+
+**例:**
+
+1. ペイン `%42` で Claude Code を起動 → session-A が `running` に
+2. Claude Code を close → session-A はそのまま `running`（Stop hookが届かなかった場合）
+3. 同じペイン `%42` で resume → session-B 登録時に session-A が自動で `closed` に
 
 ## 縦長ペイン時の表示仕様
 

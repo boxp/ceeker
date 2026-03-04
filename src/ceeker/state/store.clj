@@ -119,8 +119,37 @@
      (with-file-lock dir
        #(read-state-file path)))))
 
+(defn- supersede-key
+  "Returns the supersede key for a session, or nil if
+   pane-id is empty (supersede disabled)."
+  [session]
+  (let [pane-id (:pane-id session)]
+    (when (seq pane-id)
+      [pane-id (:agent-type session) (:cwd session)])))
+
+(defn- supersede-old-sessions
+  "Closes running sessions that share the same supersede key
+   as the new session, excluding the new session itself."
+  [sessions session-id session-data now]
+  (if-let [key (supersede-key session-data)]
+    (reduce-kv
+     (fn [m sid session]
+       (assoc m sid
+              (if (and (not= sid session-id)
+                       (= :running (:agent-status session))
+                       (= key (supersede-key session)))
+                (merge session
+                       {:agent-status :closed
+                        :last-message "superseded"
+                        :last-updated now})
+                session)))
+     {}
+     sessions)
+    sessions))
+
 (defn update-session!
-  "Updates a session in the state store."
+  "Updates a session in the state store.
+   Supersedes running sessions with the same pane key."
   ([session-id session-data]
    (update-session! (state-dir) session-id session-data))
   ([dir session-id session-data]
@@ -129,13 +158,17 @@
      (with-file-lock dir
        (fn []
          (let [state (read-state-file path)
-               existing (get-in state
-                                [:sessions session-id] {})
+               now (.toString (java.time.Instant/now))
+               superseded (supersede-old-sessions
+                           (:sessions state)
+                           session-id session-data now)
+               existing (get superseded session-id {})
                updated (merge existing session-data)]
            (write-state-file!
             path
-            (assoc-in state
-                      [:sessions session-id] updated))))))))
+            {:sessions
+             (assoc superseded
+                    session-id updated)})))))))
 
 (defn remove-session!
   "Removes a session from the state store."
