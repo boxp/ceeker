@@ -171,9 +171,12 @@
 
 (defn- merge-session-data
   "Merges new data into existing session.
-   Blocks all updates on superseded sessions."
+   Blocks running updates on superseded sessions.
+   Non-running updates are allowed but the superseded
+   flag is preserved through merges."
   [existing session-data]
-  (if (superseded? existing)
+  (if (and (superseded? existing)
+           (= :running (:agent-status session-data)))
     existing
     (merge existing session-data)))
 

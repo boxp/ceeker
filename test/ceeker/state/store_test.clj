@@ -368,15 +368,24 @@
                       [:sessions "old"])]
         (is (= :closed (:agent-status s)))
         (is (= "superseded" (:last-message s))))
-      ;; even a non-running update should not clear
-      ;; superseded state
+      ;; non-running update merges but flag is kept
       (store/update-session!
        dir "old"
        {:agent-status :completed
         :last-message "stop event"})
       (let [s (get-in (store/read-sessions dir)
                       [:sessions "old"])]
-        (is (= :closed (:agent-status s)))
-        (is (= "superseded" (:last-message s))))
+        (is (= :completed (:agent-status s)))
+        (is (= "stop event" (:last-message s)))
+        (is (true? (:superseded s))))
+      ;; running update still blocked after non-running
+      (store/update-session!
+       dir "old"
+       {:agent-status :running
+        :last-message "late resume"})
+      (let [s (get-in (store/read-sessions dir)
+                      [:sessions "old"])]
+        (is (= :completed (:agent-status s)))
+        (is (true? (:superseded s))))
       (finally
         (cleanup-dir dir)))))
