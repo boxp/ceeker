@@ -37,7 +37,8 @@
 
 (defn list-pane-info
   "Returns a list of maps with :cwd and :pid for each pane.
-   Returns nil if tmux is unavailable or no panes found."
+   Returns empty list when tmux has no panes.
+   Returns nil only if tmux is unavailable."
   []
   (try
     (let [fmt (str "#{pane_current_path}"
@@ -46,10 +47,9 @@
                   "tmux" "list-panes" "-a"
                   "-F" fmt)]
       (when (zero? (:exit result))
-        (let [infos (keep parse-pane-line
-                          (str/split-lines
-                           (:out result)))]
-          (when (seq infos) infos))))
+        (vec (keep parse-pane-line
+                   (str/split-lines
+                    (:out result))))))
     (catch Exception _ nil)))
 
 (defn- read-proc-cmdline
@@ -152,15 +152,16 @@
 (defn close-stale-sessions!
   "Checks running sessions and marks stale ones as closed.
    Atomically updates all stale sessions under file lock.
-   Does nothing if tmux is unavailable."
+   Does nothing if tmux is unavailable (nil)."
   ([] (close-stale-sessions! nil))
   ([state-dir]
-   (when-let [pane-infos (list-pane-info)]
-     (let [pane-cwds (set (map :cwd pane-infos))
-           pred (fn [_sid session]
-                  (stale-session?
-                   session pane-cwds pane-infos))]
-       (if state-dir
-         (store/close-sessions-by-pred!
-          state-dir pred)
-         (store/close-sessions-by-pred! pred))))))
+   (let [pane-infos (list-pane-info)]
+     (when (some? pane-infos)
+       (let [pane-cwds (set (map :cwd pane-infos))
+             pred (fn [_sid session]
+                    (stale-session?
+                     session pane-cwds pane-infos))]
+         (if state-dir
+           (store/close-sessions-by-pred!
+            state-dir pred)
+           (store/close-sessions-by-pred! pred)))))))
