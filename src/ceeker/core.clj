@@ -78,6 +78,13 @@
                       " for "
                       (:session-id result)))))))
 
+(defn- print-errors!
+  "Prints CLI errors to stderr and exits."
+  [errors]
+  (binding [*out* *err*]
+    (doseq [e errors] (println e)))
+  (System/exit 1))
+
 (defn -main
   "Main entry point."
   [& args]
@@ -85,19 +92,12 @@
         (cli/parse-opts args cli-options :in-order true)]
     (cond
       errors
-      (do
-        (binding [*out* *err*]
-          (doseq [e errors]
-            (println e)))
-        (System/exit 1))
-
+      (print-errors! errors)
       (:help options)
-      (do
-        (println (usage summary))
-        (System/exit 0))
-
+      (do (println (usage summary))
+          (System/exit 0))
       (= "hook" (first arguments))
       (handle-hook-command (rest arguments))
-
       :else
-      (tui/start-tui!))))
+      (do (tui/start-tui!)
+          (System/exit 0)))))
