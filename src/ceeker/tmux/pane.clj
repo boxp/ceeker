@@ -29,11 +29,13 @@
    (java.util.regex.Pattern/quote pane-separator)))
 
 (defn- parse-pane-line
-  "Parses a pane info line into a map with :cwd and :pid."
+  "Parses a pane info line into a map with :cwd and :pid.
+   PID comes first (digits only), path second (may contain
+   the separator in rare cases, handled by split limit)."
   [line]
   (let [parts (str/split line pane-sep-re 2)]
     (when (= 2 (count parts))
-      {:cwd (first parts) :pid (second parts)})))
+      {:pid (first parts) :cwd (second parts)})))
 
 (defn list-pane-info
   "Returns a list of maps with :cwd and :pid for each pane.
@@ -41,8 +43,8 @@
    Returns nil only if tmux is unavailable."
   []
   (try
-    (let [fmt (str "#{pane_current_path}"
-                   pane-separator "#{pane_pid}")
+    (let [fmt (str "#{pane_pid}"
+                   pane-separator "#{pane_current_path}")
           result (shell/sh
                   "tmux" "list-panes" "-a"
                   "-F" fmt)]
