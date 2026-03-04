@@ -236,3 +236,74 @@
                   plain-lines))
       (is (some #(str/includes? % "first line second line")
                 plain-lines)))))
+
+;; -- normalize-message tests --
+
+(deftest test-normalize-message
+  (testing "newlines replaced with spaces"
+    (is (= "line1 line2" (#'view/normalize-message "line1\nline2"))))
+  (testing "carriage-return-newline replaced"
+    (is (= "a b c" (#'view/normalize-message "a\r\nb\r\nc"))))
+  (testing "nil returns empty string"
+    (is (= "" (#'view/normalize-message nil))))
+  (testing "no newlines unchanged"
+    (is (= "hello world" (#'view/normalize-message "hello world")))))
+
+;; -- pad-to-width tests --
+
+(deftest test-pad-to-width
+  (testing "pads short ASCII string"
+    (let [result (#'view/pad-to-width "hi" 5)]
+      (is (= 5 (#'view/str-display-width result)))
+      (is (str/starts-with? result "hi"))))
+  (testing "pads CJK string accounting for display width"
+    (let [result (#'view/pad-to-width "日本" 6)]
+      (is (= 6 (#'view/str-display-width result)))
+      (is (str/starts-with? result "日本"))))
+  (testing "string already at target width unchanged"
+    (is (= "hello" (#'view/pad-to-width "hello" 5))))
+  (testing "string wider than target unchanged"
+    (is (= "hello world" (#'view/pad-to-width "hello world" 5)))))
+
+;; -- format-session-line tests (table display) --
+
+(deftest test-format-session-line-no-newlines
+  (testing "table row with newlines in message renders as single line"
+    (let [session (make-session "line1\nline2\nline3")
+          line (#'view/format-session-line session false 0)
+          plain (strip-ansi line)]
+      (is (not (str/includes? plain "\n"))
+          "Table row must not contain newline characters")
+      (is (str/includes? plain "line1 line2 line3")))))
+
+(deftest test-format-session-line-crlf
+  (testing "table row with CRLF in message renders as single line"
+    (let [session (make-session "first\r\nsecond")
+          line (#'view/format-session-line session false 0)
+          plain (strip-ansi line)]
+      (is (not (str/includes? plain "\n")))
+      (is (str/includes? plain "first second")))))
+
+(deftest test-format-session-line-cjk-message
+  (testing "table row with CJK message truncates by display width"
+    (let [session (make-session "日本語の長いメッセージがテーブル表示で適切に切り詰められることを確認")
+          line (#'view/format-session-line session false 0)
+          plain (strip-ansi line)]
+      (is (not (str/includes? plain "\n")))
+      (is (str/includes? plain "…")
+          "Long CJK message should be truncated with ellipsis"))))
+
+(deftest test-format-session-line-short-message
+  (testing "table row with short message has no truncation"
+    (let [session (make-session "short msg")
+          line (#'view/format-session-line session false 0)
+          plain (strip-ansi line)]
+      (is (not (str/includes? plain "\n")))
+      (is (str/includes? plain "short msg")))))
+
+(deftest test-format-session-line-nil-message
+  (testing "table row with nil message renders without error"
+    (let [session (make-session nil)
+          line (#'view/format-session-line session false 0)
+          plain (strip-ansi line)]
+      (is (not (str/includes? plain "\n"))))))

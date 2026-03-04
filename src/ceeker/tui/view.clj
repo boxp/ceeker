@@ -133,20 +133,39 @@
   (when (seq cwd)
     (last (str/split cwd #"/"))))
 
+(defn- normalize-message
+  "Collapses newlines into spaces for single-line display contexts."
+  [s]
+  (str/replace (or s "") #"\r?\n" " "))
+
+(defn- pad-to-width
+  "Pads string with spaces so its display width reaches exactly target-width.
+   If string is already wider, returns it unchanged."
+  [s target-width]
+  (let [current (str-display-width s)
+        deficit (- target-width current)]
+    (if (pos? deficit)
+      (str s (apply str (repeat deficit \space)))
+      s)))
+
 (defn- format-session-line
   "Formats a single session line for display."
   [session selected? _index]
   (let [pfx (if selected?
               (str ansi-reverse " > " ansi-reset ansi-reverse)
               "   ")
-        sfx (if selected? ansi-reset "")]
+        sfx (if selected? ansi-reset "")
+        msg (-> (:last-message session)
+                normalize-message
+                (truncate-by-width 40)
+                (pad-to-width 40))]
     (str pfx
-         (format " %-12s %s %s %-12s %-40s %s"
+         (format " %-12s %s %s %-12s %s %s"
                  (truncate (:session-id session) 12)
                  (agent-badge (:agent-type session))
                  (status-badge (:agent-status session))
                  (or (cwd-short-name (:cwd session)) "")
-                 (truncate (:last-message session) 40)
+                 msg
                  (format-time (:last-updated session)))
          sfx)))
 
