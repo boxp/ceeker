@@ -206,7 +206,6 @@
                    (assoc sessions
                           session-id updated)))))))))
 
-
 (defn remove-session!
   "Removes a session from the state store."
   ([session-id]
