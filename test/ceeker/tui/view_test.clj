@@ -237,6 +237,28 @@
       (is (some #(str/includes? % "first line second line")
                 plain-lines)))))
 
+(deftest test-format-session-card-selection-highlight-header-only
+  (testing "selected card applies reverse video only to header row (line1)"
+    (let [card (#'view/format-session-card
+                (make-session "some message") true 0 60)
+          lines (str/split card #"\n")
+          reverse-code "\033[7m"]
+      (is (str/includes? (first lines) reverse-code)
+          "line1 (header) should contain ansi-reverse when selected")
+      (doseq [line (rest lines)]
+        (is (not (str/includes? line reverse-code))
+            (str "non-header line should not contain ansi-reverse: "
+                 (pr-str (strip-ansi line)))))))
+  (testing "unselected card has no reverse video on any line"
+    (let [card (#'view/format-session-card
+                (make-session "some message") false 0 60)
+          lines (str/split card #"\n")
+          reverse-code "\033[7m"]
+      (doseq [line lines]
+        (is (not (str/includes? line reverse-code))
+            (str "unselected card line should not contain ansi-reverse: "
+                 (pr-str (strip-ansi line))))))))
+
 ;; -- normalize-message tests --
 
 (deftest test-normalize-message
