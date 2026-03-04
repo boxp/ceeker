@@ -21,23 +21,35 @@
                       (:out result))))))
     (catch Exception _ nil)))
 
+(def ^:private pane-separator "|||")
+
+(def ^:private pane-sep-re
+  "Compiled regex for splitting pane info lines."
+  (re-pattern
+   (java.util.regex.Pattern/quote pane-separator)))
+
+(defn- parse-pane-line
+  "Parses a pane info line into a map with :cwd and :pid."
+  [line]
+  (let [parts (str/split line pane-sep-re 2)]
+    (when (= 2 (count parts))
+      {:cwd (first parts) :pid (second parts)})))
+
 (defn list-pane-info
   "Returns a list of maps with :cwd and :pid for each pane.
-   Returns nil if tmux is unavailable."
+   Returns nil if tmux is unavailable or no panes found."
   []
   (try
-    (let [result (shell/sh
+    (let [fmt (str "#{pane_current_path}"
+                   pane-separator "#{pane_pid}")
+          result (shell/sh
                   "tmux" "list-panes" "-a"
-                  "-F"
-                  "#{pane_current_path}\t#{pane_pid}")]
+                  "-F" fmt)]
       (when (zero? (:exit result))
-        (keep
-         (fn [line]
-           (let [parts (str/split line #"\t" 2)]
-             (when (= 2 (count parts))
-               {:cwd (first parts)
-                :pid (second parts)})))
-         (str/split-lines (:out result)))))
+        (let [infos (keep parse-pane-line
+                          (str/split-lines
+                           (:out result)))]
+          (when (seq infos) infos))))
     (catch Exception _ nil)))
 
 (defn- read-proc-cmdline
