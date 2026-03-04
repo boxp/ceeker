@@ -1,12 +1,23 @@
 (ns ceeker.tui.app
   "TUI application main loop."
   (:require [ceeker.state.store :as store]
+            [ceeker.tmux.pane :as pane]
             [ceeker.tui.filter :as f]
             [ceeker.tui.input :as input]
             [ceeker.tui.view :as view]
             [ceeker.tui.watcher :as watcher]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
+
+(def ^:private check-interval
+  "Pane liveness check interval in ticks (~500ms each)."
+  20)
+
+(defn- maybe-check-panes!
+  "Runs pane liveness check when tick is due."
+  [tick state-dir]
+  (when (zero? (mod tick check-interval))
+    (pane/close-stale-sessions! state-dir)))
 
 (defn- get-session-list
   "Gets session list from state store."
@@ -191,21 +202,23 @@
            fs display-mode)))
 
 (defn- wait-for-input
-  "Waits for key or file change, returns key or nil."
+  "Waits for key or file change, returns key or nil.
+   Returns nil after a single 500ms poll to allow periodic tasks."
   [terminal w]
-  (loop []
-    (let [key (input/read-key terminal 500)]
-      (cond
-        (some? key) key
-        (or (nil? w) (watcher/poll-change w 0)) nil
-        :else (recur)))))
+  (let [key (input/read-key terminal 500)]
+    (cond
+      (some? key) key
+      :else (do (when w (watcher/poll-change w 0)) nil))))
 
 (defn- create-watcher-for
-  "Creates a watcher for the given state dir."
+  "Creates a watcher for the given state dir.
+   Returns nil if WatchService is unavailable."
   [state-dir]
-  (if state-dir
-    (watcher/create-watcher state-dir)
-    (watcher/create-watcher)))
+  (try
+    (if state-dir
+      (watcher/create-watcher state-dir)
+      (watcher/create-watcher))
+    (catch Exception _ nil)))
 
 (defn- next-loop-state
   "Applies process-key result to loop state."
@@ -220,7 +233,8 @@
   "Main TUI render-input loop."
   [terminal w state-dir]
   (loop [sel 0 msg nil fs f/empty-filter
-         sm? false sb nil display-mode :auto]
+         sm? false sb nil display-mode :auto tick 0]
+    (maybe-check-panes! tick state-dir)
     (let [sessions (get-session-list state-dir)
           visible (filtered-sorted sessions fs)
           mx (max 0 (dec (count visible)))
@@ -237,7 +251,7 @@
                    (next-loop-state r cl fs sm? sb display-mode)]
           (let [[nsel nmsg nfs nsm? nsb ndm]
                 next-state]
-            (recur nsel nmsg nfs nsm? nsb ndm)))))))
+            (recur nsel nmsg nfs nsm? nsb ndm (inc tick))))))))
 
 (defn start-tui!
   "Runs the TUI application loop."

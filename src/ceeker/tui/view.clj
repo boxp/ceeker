@@ -28,6 +28,7 @@
     :running (str ansi-green "● Running" ansi-reset)
     :waiting (str ansi-yellow "◉ Waiting" ansi-reset)
     :completed (str ansi-dim "○ Done" ansi-reset)
+    :closed (str ansi-dim "✕ Closed" ansi-reset)
     :error (str ansi-red "✗ Error" ansi-reset)
     :idle (str ansi-dim "◌ Idle" ansi-reset)
     (str ansi-dim "? Unknown" ansi-reset)))

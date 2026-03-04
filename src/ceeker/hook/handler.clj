@@ -2,6 +2,7 @@
   "Hook event handler for Claude Code and Codex.
    Normalizes hook payloads and writes to State Store."
   (:require [ceeker.state.store :as store]
+            [ceeker.tmux.pane :as pane]
             [cheshire.core :as json]
             [clojure.string :as str]))
 
@@ -152,4 +153,5 @@
         state-dir session-id session-data)
        (store/update-session!
         session-id session-data))
+     (pane/close-stale-sessions! state-dir)
      session-data)))

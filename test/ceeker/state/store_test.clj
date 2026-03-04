@@ -123,3 +123,50 @@
         (is (= 0 (count (:sessions result)))))
       (finally
         (cleanup-dir dir)))))
+
+(deftest test-close-stale-sessions
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "s1"
+       {:agent-type :claude-code
+        :agent-status :running
+        :cwd "/alive"})
+      (store/update-session!
+       dir "s2"
+       {:agent-type :codex
+        :agent-status :running
+        :cwd "/dead"})
+      (store/update-session!
+       dir "s3"
+       {:agent-type :claude-code
+        :agent-status :completed
+        :cwd "/also-dead"})
+      (store/close-stale-sessions!
+       dir #{"/alive"})
+      (let [state (store/read-sessions dir)
+            s1 (get-in state [:sessions "s1"])
+            s2 (get-in state [:sessions "s2"])
+            s3 (get-in state [:sessions "s3"])]
+        (is (= :running (:agent-status s1)))
+        (is (= :closed (:agent-status s2)))
+        (is (= "pane closed"
+               (:last-message s2)))
+        (is (= :completed (:agent-status s3))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-close-stale-empty-cwd-untouched
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "s1"
+       {:agent-type :codex
+        :agent-status :running
+        :cwd ""})
+      (store/close-stale-sessions! dir #{})
+      (let [s1 (get-in (store/read-sessions dir)
+                       [:sessions "s1"])]
+        (is (= :running (:agent-status s1))))
+      (finally
+        (cleanup-dir dir)))))
