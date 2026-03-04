@@ -73,10 +73,35 @@
       (or (:last-updated s) "")])
    (f/apply-filters filter-state sessions)))
 
+(defn- get-terminal-width
+  "Gets the current terminal width from a JLine terminal."
+  [^org.jline.terminal.Terminal terminal]
+  (let [w (.getWidth terminal)]
+    (if (pos? w) w 120)))
+
+(defn- next-display-mode
+  "Cycles display mode: :auto -> :table -> :card -> :auto."
+  [current]
+  (case current
+    :auto :table
+    :table :card
+    :card :auto
+    :auto))
+
+(defn- display-mode-label
+  "Returns display label for the current mode."
+  [mode]
+  (case mode
+    :auto "Auto"
+    :table "Table"
+    :card "Card"
+    "Auto"))
+
 (defn- render-screen
   "Renders the screen with sessions and message."
-  [sessions sel filt sm? sb msg]
-  (str (view/render sessions sel filt sm? sb)
+  [sessions sel filt sm? sb msg terminal-width display-mode]
+  (str (view/render sessions sel terminal-width display-mode
+                    filt sm? sb)
        (when msg (str "\n" msg))))
 
 (defn- handle-enter-key
@@ -112,7 +137,7 @@
 
 (defn- nav-key-result
   "Handles navigation and action keys."
-  [key sel max-idx visible fs]
+  [key sel max-idx visible fs display-mode]
   (cond
     (= key \q) {:quit true}
     (or (= key :up) (= key \k))
@@ -125,6 +150,12 @@
     (= key \r)
     {:sel sel :fs fs
      :msg (view/render-message "Refreshed")}
+    (= key \v)
+    (let [new-mode (next-display-mode display-mode)]
+      {:sel sel :fs fs :dm new-mode
+       :msg (view/render-message
+             (str "View: "
+                  (display-mode-label new-mode)))})
     :else nil))
 
 (defn- filter-key-result
@@ -139,21 +170,25 @@
 
 (defn- handle-normal-key
   "Processes a key in normal mode."
-  [key sel max-idx visible fs]
-  (or (nav-key-result key sel max-idx visible fs)
-      (filter-key-result key fs)
-      {:sel sel :fs fs}))
+  [key sel max-idx visible fs display-mode]
+  (let [result (or (nav-key-result
+                    key sel max-idx visible fs display-mode)
+                   (filter-key-result key fs)
+                   {:sel sel :fs fs})]
+    (assoc result :dm (get result :dm display-mode))))
 
 (defn- process-key
   "Dispatches key to appropriate handler."
-  [key clamped sm? sb visible max-idx fs]
+  [key clamped sm? sb visible max-idx fs display-mode]
   (cond
     (nil? key) {:idle true}
     sm? (let [r (handle-search-key key sb fs)]
           {:sel 0 :fs (:fs r)
-           :sm? (:sm? r) :sb (:sb r)})
+           :sm? (:sm? r) :sb (:sb r)
+           :dm display-mode})
     :else (handle-normal-key
-           key clamped max-idx visible fs)))
+           key clamped max-idx visible
+           fs display-mode)))
 
 (defn- wait-for-input
   "Waits for key or file change, returns key or nil."
@@ -172,28 +207,37 @@
     (watcher/create-watcher state-dir)
     (watcher/create-watcher)))
 
+(defn- next-loop-state
+  "Applies process-key result to loop state."
+  [r cl fs sm? sb display-mode]
+  (cond
+    (:idle r) [cl nil fs sm? sb display-mode]
+    (nil? (:fs r)) nil
+    :else [(get r :sel cl) (:msg r) (:fs r)
+           (get r :sm? false) (:sb r) (:dm r)]))
+
 (defn- tui-loop
   "Main TUI render-input loop."
   [terminal w state-dir]
   (loop [sel 0 msg nil fs f/empty-filter
-         sm? false sb nil]
+         sm? false sb nil display-mode :auto]
     (let [sessions (get-session-list state-dir)
           visible (filtered-sorted sessions fs)
           mx (max 0 (dec (count visible)))
           cl (clamp sel 0 mx)
-          scr (render-screen sessions cl fs sm? sb msg)]
+          width (get-terminal-width terminal)
+          scr (render-screen sessions cl fs sm? sb msg
+                             width display-mode)]
       (print scr)
       (flush)
       (let [r (process-key
                (wait-for-input terminal w)
-               cl sm? sb visible mx fs)]
-        (cond
-          (:idle r)
-          (recur cl nil fs sm? sb)
-          (nil? (:fs r)) nil
-          :else
-          (recur (get r :sel cl) (:msg r) (:fs r)
-                 (get r :sm? false) (:sb r)))))))
+               cl sm? sb visible mx fs display-mode)]
+        (when-let [next-state
+                   (next-loop-state r cl fs sm? sb display-mode)]
+          (let [[nsel nmsg nfs nsm? nsb ndm]
+                next-state]
+            (recur nsel nmsg nfs nsm? nsb ndm)))))))
 
 (defn start-tui!
   "Runs the TUI application loop."

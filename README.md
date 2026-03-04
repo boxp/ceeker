@@ -42,6 +42,7 @@ ceeker
 | `k` / `↑` | 上へ移動 |
 | `Enter` | 選択セッションのtmuxペインへジャンプ |
 | `r` | 手動リフレッシュ |
+| `v` | 表示切替 (Auto→Table→Card) |
 | `a` | エージェント種別フィルタ切替（全て → Claude → Codex → 全て） |
 | `s` | ステータスフィルタ切替（全て → running → completed → error → waiting → idle → 全て） |
 | `/` | テキスト検索（session-id / cwd 部分一致） |
@@ -100,41 +101,63 @@ notify = ["ceeker", "hook", "codex"]
 
 Codex は `notify` コマンドの最後の引数として JSON ペイロードを追加します（stdin ではなく argv 経由）。
 
-## State Store
+## 縦長ペイン時の表示仕様
 
-セッション状態は `$XDG_RUNTIME_DIR/ceeker/sessions.edn` に永続化されます（フォールバック: `/tmp/ceeker-<user>/sessions.edn`）。
+ターミナル幅が80カラム未満の場合、自動的にコンパクトカード表示に切り替わります。
 
-- TUI未起動でもhookイベントは保存されます
-- 複数TUI / 複数hookプロセスの同時実行に対応（ファイルロック使用）
+### 表示モード
+
+| モード | 説明 |
+|--------|------|
+| Auto | 幅80未満でカード、80以上でテーブル（デフォルト） |
+| Table | 常にテーブル表示 |
+| Card | 常にカード表示 |
+
+`v` キーで Auto → Table → Card の順に切り替え可能です。
+
+### カード表示例
+
+```
+  ceeker — 2 session(s)
+  ────────────────────────────────
+  ┌ abc123 [Claude] ● Running
+  │ 12:34:56  my-project
+  │ Working on feature...
+  └─
+  ┌ xyz789 [Codex] ○ Done
+  │ 12:30:00  backend
+  │ Completed refactoring
+  └─
+  ────────────────────────────────
+  [j/k] Navigate  [Enter] Jump to tmux  [r] Refresh  [v] View:Auto  [q] Quit
+```
+
+### テーブル表示例（通常幅）
+
+```
+  ceeker — 2 session(s)
+  ────────────────────────────────────────────────────────────────────────────────
+   SESSION      AGENT     STATUS      WORKTREE     MESSAGE                                  UPDATED
+  ────────────────────────────────────────────────────────────────────────────────
+   abc123       [Claude]  ● Running   my-project   Working on feature...                    12:34:56
+   xyz789       [Codex]   ○ Done      backend      Completed refactoring                    12:30:00
+  ────────────────────────────────────────────────────────────────────────────────
+  [j/k] Navigate  [Enter] Jump to tmux  [r] Refresh  [v] View:Auto  [q] Quit
+```
 
 ## 開発
 
-### 前提条件（開発者向け）
-
-- Java 21+
-- [Clojure CLI](https://clojure.org/guides/install_clojure) 1.12+
-- [GraalVM](https://www.graalvm.org/) (native image build用)
-
 ```bash
-git clone https://github.com/boxp/ceeker.git
-cd ceeker
-
 # テスト
-clojure -M:test
+make test
 
 # lint
-clojure -M:lint
+make lint
 
-# フォーマットチェック
-clojure -M:format-check
-
-# フォーマット修正
-clojure -M:format-fix
-
-# 開発時のTUI起動
-clojure -M:run
+# フォーマット
+make format
 ```
 
 ## ライセンス
 
-MIT License - 詳細は [LICENSE](LICENSE) を参照。
+MIT
