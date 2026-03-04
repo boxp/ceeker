@@ -1,7 +1,7 @@
 (ns ceeker.state.store-test
   (:require [ceeker.state.store :as store]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is testing]]))
 
 (defn- temp-dir
   "Creates a temporary directory for testing."
@@ -170,6 +170,41 @@
         (is (= :running (:agent-status s1))))
       (finally
         (cleanup-dir dir)))))
+
+(deftest test-close-stale-idle-session
+  (testing "Idle sessions are also closed when stale"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :idle
+          :cwd "/gone"
+          :last-message "idle"})
+        (store/close-stale-sessions! dir #{})
+        (let [s1 (get-in (store/read-sessions dir)
+                         [:sessions "s1"])]
+          (is (= :closed (:agent-status s1)))
+          (is (= "pane closed" (:last-message s1))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-close-stale-waiting-session
+  (testing "Waiting sessions are also closed when stale"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :codex
+          :agent-status :waiting
+          :cwd "/gone"
+          :last-message "waiting"})
+        (store/close-stale-sessions! dir #{})
+        (let [s1 (get-in (store/read-sessions dir)
+                         [:sessions "s1"])]
+          (is (= :closed (:agent-status s1))))
+        (finally
+          (cleanup-dir dir))))))
 
 ;; --- Supersede-per-Key tests (B) ---
 
@@ -389,3 +424,103 @@
         (is (true? (:superseded s))))
       (finally
         (cleanup-dir dir)))))
+
+;; --- update-session-if-active! tests ---
+
+(deftest test-update-if-active-applies-when-running
+  (testing "Updates session when it is still :running"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :last-message "working"})
+        (let [applied (store/update-session-if-active!
+                       dir "s1"
+                       {:agent-status :idle
+                        :last-message "idle"})]
+          (is (true? applied))
+          (let [s (get-in (store/read-sessions dir)
+                          [:sessions "s1"])]
+            (is (= :idle (:agent-status s)))
+            (is (= "idle" (:last-message s)))
+            (is (= :claude-code (:agent-type s)))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-update-if-active-applies-when-idle
+  (testing "Updates session when it is :idle"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :idle
+          :cwd "/tmp/work"
+          :last-message "idle"})
+        (let [applied (store/update-session-if-active!
+                       dir "s1"
+                       {:agent-status :running
+                        :last-message "running"})]
+          (is (true? applied))
+          (let [s (get-in (store/read-sessions dir)
+                          [:sessions "s1"])]
+            (is (= :running (:agent-status s)))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-update-if-active-applies-when-waiting
+  (testing "Updates session when it is :waiting"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :waiting
+          :cwd "/tmp/work"
+          :last-message "waiting"})
+        (let [applied (store/update-session-if-active!
+                       dir "s1"
+                       {:agent-status :running
+                        :last-message "running"})]
+          (is (true? applied))
+          (let [s (get-in (store/read-sessions dir)
+                          [:sessions "s1"])]
+            (is (= :running (:agent-status s)))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-update-if-active-skips-completed
+  (testing "Skips update when session is :completed"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :completed
+          :cwd "/tmp/work"
+          :last-message "done"})
+        (let [applied (store/update-session-if-active!
+                       dir "s1"
+                       {:agent-status :idle
+                        :last-message "idle"})]
+          (is (false? applied))
+          (let [s (get-in (store/read-sessions dir)
+                          [:sessions "s1"])]
+            (is (= :completed (:agent-status s)))
+            (is (= "done" (:last-message s)))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-update-if-active-skips-nonexistent
+  (testing "Skips update for non-existent session"
+    (let [dir (temp-dir)]
+      (try
+        (let [applied (store/update-session-if-active!
+                       dir "missing"
+                       {:agent-status :idle})]
+          (is (false? applied)))
+        (finally
+          (cleanup-dir dir))))))
