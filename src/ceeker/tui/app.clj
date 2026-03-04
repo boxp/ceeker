@@ -127,22 +127,26 @@
         (view/render-error (:error result))))))
 
 (defn- handle-search-key
-  "Handles a key press in search mode."
+  "Handles a key press in search mode.
+   Applies filter interactively on each keystroke."
   [key search-buf filter-state]
   (cond
     (= key :enter)
     {:sm? false :sb nil
      :fs (f/set-search-query filter-state search-buf)}
     (= key :escape)
-    {:sm? false :sb nil :fs filter-state}
+    {:sm? false :sb nil
+     :fs (f/set-search-query filter-state nil)}
     (or (= key \u007f) (= key \backspace))
-    {:sm? true :fs filter-state
-     :sb (when (seq search-buf)
-           (subs search-buf
-                 0 (dec (count search-buf))))}
+    (let [new-buf (when (seq search-buf)
+                    (subs search-buf
+                          0 (dec (count search-buf))))]
+      {:sm? true :sb new-buf
+       :fs (f/set-search-query filter-state new-buf)})
     (char? key)
-    {:sm? true :sb (str search-buf key)
-     :fs filter-state}
+    (let [new-buf (str search-buf key)]
+      {:sm? true :sb new-buf
+       :fs (f/set-search-query filter-state new-buf)})
     :else
     {:sm? true :sb search-buf :fs filter-state}))
 
@@ -221,9 +225,11 @@
     (catch Exception _ nil)))
 
 (defn- next-loop-state
-  "Applies process-key result to loop state."
+  "Applies process-key result to loop state.
+   Returns nil to exit the loop on quit."
   [r cl fs sm? sb display-mode]
   (cond
+    (:quit r) nil
     (:idle r) [cl nil fs sm? sb display-mode]
     (nil? (:fs r)) nil
     :else [(get r :sel cl) (:msg r) (:fs r)
