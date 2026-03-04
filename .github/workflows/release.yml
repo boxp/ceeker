@@ -51,11 +51,7 @@ jobs:
         run: |
           native-image \
             -jar target/ceeker.jar \
-            -o ceeker-${{ matrix.platform }} \
-            --no-fallback \
-            --initialize-at-build-time \
-            --initialize-at-run-time=org.jline.nativ \
-            -H:+ReportExceptionStackTraces
+            -o ceeker-${{ matrix.platform }}
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

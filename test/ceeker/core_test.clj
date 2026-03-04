@@ -4,6 +4,11 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
+(deftest version-is-loaded
+  (testing "version reads from CEEKER_VERSION resource"
+    (is (string? core/version))
+    (is (not= "" core/version))))
+
 (deftest payload-from-cli-accepts-inline-json
   (let [expected "{\"session_id\":\"foo\",\"message\":\"hi\"}"
         args ["codex" "notification" expected]]

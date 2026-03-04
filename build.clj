@@ -12,11 +12,13 @@
 
 (defn uber [_]
   (clean nil)
-  (b/copy-dir {:src-dirs ["src"]
+  (b/copy-dir {:src-dirs ["src" "resources"]
                :target-dir class-dir})
   (b/compile-clj {:basis @basis
                    :ns-compile '[ceeker.core]
-                   :class-dir class-dir})
+                   :class-dir class-dir
+                   :java-opts ["-Dclojure.compiler.direct-linking=true"
+                               "-Dclojure.spec.skip-macros=true"]})
   (b/uber {:class-dir class-dir
             :uber-file uber-file
             :basis @basis
