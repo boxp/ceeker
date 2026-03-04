@@ -202,21 +202,26 @@
            fs display-mode)))
 
 (defn- wait-for-input
-  "Waits for key or file change, returns key or nil."
+  "Waits for key or file change, returns key or nil.
+   Returns nil after check-interval polls to allow periodic tasks."
   [terminal w]
-  (loop []
+  (loop [n 0]
     (let [key (input/read-key terminal 500)]
       (cond
         (some? key) key
-        (or (nil? w) (watcher/poll-change w 0)) nil
-        :else (recur)))))
+        (or (nil? w) (watcher/poll-change w 0)
+            (>= n check-interval)) nil
+        :else (recur (inc n))))))
 
 (defn- create-watcher-for
-  "Creates a watcher for the given state dir."
+  "Creates a watcher for the given state dir.
+   Returns nil if WatchService is unavailable."
   [state-dir]
-  (if state-dir
-    (watcher/create-watcher state-dir)
-    (watcher/create-watcher)))
+  (try
+    (if state-dir
+      (watcher/create-watcher state-dir)
+      (watcher/create-watcher))
+    (catch Exception _ nil)))
 
 (defn- next-loop-state
   "Applies process-key result to loop state."
