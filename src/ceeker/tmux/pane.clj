@@ -112,47 +112,26 @@
      (some #(find-agent-in-tree (:pid %) agent-type)
            matching-panes))))
 
-(defn- stale-session-id
-  "Returns session-id if the session is stale, nil otherwise."
-  [[sid session] pane-cwds pane-infos]
-  (when (and (= :running (:agent-status session))
-             (seq (:cwd session)))
-    (cond
-      (not (contains? pane-cwds (:cwd session))) sid
-      (not (session-has-live-agent?
-            session pane-infos)) sid)))
-
-(defn- find-stale-ids
-  "Returns a seq of stale session IDs."
-  [state-dir pane-cwds pane-infos]
-  (let [state (if state-dir
-                (store/read-sessions state-dir)
-                (store/read-sessions))]
-    (keep #(stale-session-id % pane-cwds pane-infos)
-          (:sessions state))))
-
-(defn- close-session-ids!
-  "Marks the given session IDs as closed."
-  [state-dir stale-ids]
-  (let [now (.toString (java.time.Instant/now))
-        close-data {:agent-status :closed
-                    :last-message "pane closed"
-                    :last-updated now}]
-    (doseq [sid stale-ids]
-      (if state-dir
-        (store/update-session!
-         state-dir sid close-data)
-        (store/update-session!
-         sid close-data)))))
+(defn- stale-session?
+  "Returns true if the session is stale given pane state."
+  [session pane-cwds pane-infos]
+  (and (seq (:cwd session))
+       (or (not (contains? pane-cwds (:cwd session)))
+           (not (session-has-live-agent?
+                 session pane-infos)))))
 
 (defn close-stale-sessions!
   "Checks running sessions and marks stale ones as closed.
-   Uses process tree liveness when pane info is available.
+   Atomically updates all stale sessions under file lock.
    Does nothing if tmux is unavailable."
   ([] (close-stale-sessions! nil))
   ([state-dir]
    (when-let [pane-infos (list-pane-info)]
      (let [pane-cwds (set (map :cwd pane-infos))
-           stale-ids (find-stale-ids
-                      state-dir pane-cwds pane-infos)]
-       (close-session-ids! state-dir stale-ids)))))
+           pred (fn [_sid session]
+                  (stale-session?
+                   session pane-cwds pane-infos))]
+       (if state-dir
+         (store/close-sessions-by-pred!
+          state-dir pred)
+         (store/close-sessions-by-pred! pred))))))

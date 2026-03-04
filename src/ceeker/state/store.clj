@@ -244,3 +244,39 @@
            (write-state-file!
             path
             {:sessions updated})))))))
+
+(defn- apply-stale-pred
+  "Returns updated sessions map, closing running sessions
+   for which stale-pred returns true."
+  [sessions stale-pred now]
+  (reduce-kv
+   (fn [m sid session]
+     (assoc m sid
+            (if (and (= :running (:agent-status session))
+                     (stale-pred sid session))
+              (merge session
+                     {:agent-status :closed
+                      :last-message "pane closed"
+                      :last-updated now})
+              session)))
+   {}
+   sessions))
+
+(defn close-sessions-by-pred!
+  "Atomically marks running sessions as :closed when
+   stale-pred returns true. stale-pred takes [sid session]."
+  ([stale-pred]
+   (close-sessions-by-pred! (state-dir) stale-pred))
+  ([dir stale-pred]
+   (ensure-state-dir! dir)
+   (let [path (state-file-path dir)
+         now (.toString (java.time.Instant/now))]
+     (with-file-lock dir
+       (fn []
+         (let [state (read-state-file path)
+               updated (apply-stale-pred
+                        (:sessions state)
+                        stale-pred now)]
+           (write-state-file!
+            path
+            {:sessions updated})))))))
