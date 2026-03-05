@@ -286,7 +286,6 @@
       (is (< rev-idx id-idx)
           "ansi-reverse must appear BEFORE the session id"))))
 
-
 ;; -- normalize-message tests --
 
 (deftest test-normalize-message
