@@ -17,9 +17,15 @@
   [nil :running :completed :error :waiting :idle])
 
 (defn- next-in-cycle
-  "Returns the next value in a cycle after current."
+  "Returns the next value in a cycle after current.
+   Uses pure Clojure index lookup to avoid Java interop
+   reflection issues under GraalVM native-image."
   [cycle-vec current]
-  (let [idx (.indexOf cycle-vec current)]
+  (let [idx (or (reduce-kv (fn [_ i v]
+                              (when (= v current)
+                                (reduced i)))
+                            nil cycle-vec)
+                -1)]
     (nth cycle-vec (mod (inc idx) (count cycle-vec)))))
 
 (defn toggle-agent-filter
