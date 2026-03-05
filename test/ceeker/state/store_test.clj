@@ -673,6 +673,38 @@
         (finally
           (cleanup-dir dir))))))
 
+(deftest test-purge-keeps-superseded-sessions
+  (testing "Superseded closed sessions are never purged"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "old"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "working"})
+        (store/update-session!
+         dir "new"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "resumed"})
+        ;; old is now superseded+closed
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "old"])]
+          (is (= :closed (:agent-status s)))
+          (is (true? (:superseded s))))
+        ;; Purge with 0 TTL and no live panes
+        (store/purge-expired-closed-sessions!
+         dir #{} 0)
+        (let [state (store/read-sessions dir)]
+          (is (some? (get-in state [:sessions "old"]))
+              "Superseded session must not be purged"))
+        (finally
+          (cleanup-dir dir))))))
+
 (deftest test-purge-keeps-closed-with-live-pane
   (testing "Closed session with live pane-id is not purged"
     (let [dir (temp-dir)]

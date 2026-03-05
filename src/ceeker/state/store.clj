@@ -338,9 +338,12 @@
 
 (defn- expired-closed?
   "Returns true if session is closed, not superseded,
-   and its last-updated timestamp is older than ttl-ms."
+   and its last-updated timestamp is older than ttl-ms.
+   Superseded sessions are never purged to preserve
+   the guard record against late hook updates."
   [session now-ms ttl-ms]
   (and (= :closed (:agent-status session))
+       (not (superseded? session))
        (if-let [ts (:last-updated session)]
          (try
            (let [updated-ms (.toEpochMilli
