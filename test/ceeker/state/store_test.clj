@@ -839,3 +839,92 @@
               "Agent message must be preserved after reactivation"))
         (finally
           (cleanup-dir dir))))))
+
+;; --- purge terminal-status sessions tests ---
+
+(deftest test-purge-expired-completed-sessions
+  (testing "Expired :completed sessions are purged when pane is gone"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :completed
+          :cwd "/tmp/done"
+          :pane-id "%50"
+          :last-message "task done"
+          :last-updated (.toString
+                         (.minusSeconds
+                          (java.time.Instant/now) 600))})
+        (store/purge-expired-closed-sessions!
+         dir #{} 1000)
+        (let [state (store/read-sessions dir)]
+          (is (nil? (get-in state [:sessions "s1"]))
+              "Expired completed session should be purged"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-purge-expired-error-sessions
+  (testing "Expired :error sessions are purged when pane is gone"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :error
+          :cwd "/tmp/err"
+          :pane-id "%51"
+          :last-message "something failed"
+          :last-updated (.toString
+                         (.minusSeconds
+                          (java.time.Instant/now) 600))})
+        (store/purge-expired-closed-sessions!
+         dir #{} 1000)
+        (let [state (store/read-sessions dir)]
+          (is (nil? (get-in state [:sessions "s1"]))
+              "Expired error session should be purged"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-purge-keeps-recent-completed-sessions
+  (testing "Recently completed sessions are not purged"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :completed
+          :cwd "/tmp/done"
+          :pane-id "%50"
+          :last-message "task done"
+          :last-updated (.toString
+                         (java.time.Instant/now))})
+        (store/purge-expired-closed-sessions!
+         dir #{} 300000)
+        (let [state (store/read-sessions dir)]
+          (is (some? (get-in state [:sessions "s1"]))
+              "Recently completed session should not be purged"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-purge-keeps-completed-with-live-pane
+  (testing "Completed session with live pane-id is not purged"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :completed
+          :cwd "/tmp/done"
+          :pane-id "%50"
+          :last-message "task done"
+          :last-updated (.toString
+                         (.minusSeconds
+                          (java.time.Instant/now) 600))})
+        (store/purge-expired-closed-sessions!
+         dir #{"%50"} 1000)
+        (let [state (store/read-sessions dir)]
+          (is (some? (get-in state [:sessions "s1"]))
+              "Completed session with live pane should not be purged"))
+        (finally
+          (cleanup-dir dir))))))

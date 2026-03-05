@@ -330,13 +330,17 @@
    Default: 5 minutes."
   300000)
 
-(defn- expired-closed?
-  "Returns true if session is closed, not superseded,
-   and its last-updated timestamp is older than ttl-ms.
-   Superseded sessions are never purged to preserve
+(def ^:private terminal-statuses
+  "Session statuses that represent a finished session."
+  #{:closed :completed :error})
+
+(defn- expired-terminal?
+  "Returns true if session has a terminal status, is not
+   superseded, and its last-updated timestamp is older than
+   ttl-ms. Superseded sessions are never purged to preserve
    the guard record against late hook updates."
   [session now-ms ttl-ms]
-  (and (= :closed (:agent-status session))
+  (and (contains? terminal-statuses (:agent-status session))
        (not (superseded? session))
        (if-let [ts (:last-updated session)]
          (try
@@ -347,10 +351,10 @@
          true)))
 
 (defn- purgeable?
-  "Returns true if session should be purged: expired closed
+  "Returns true if session should be purged: expired terminal
    and pane-id not in live-pane-ids."
   [session now-ms ttl-ms live-pane-ids]
-  (and (expired-closed? session now-ms ttl-ms)
+  (and (expired-terminal? session now-ms ttl-ms)
        (not (contains? live-pane-ids
                        (:pane-id session)))))
 
@@ -364,9 +368,9 @@
                 sessions)))
 
 (defn purge-expired-closed-sessions!
-  "Removes closed sessions that have exceeded the TTL
-   and whose pane-id is not in the live pane-ids set.
-   Atomic under file lock."
+  "Removes terminal sessions (closed/completed/error) that
+   have exceeded the TTL and whose pane-id is not in the
+   live pane-ids set. Atomic under file lock."
   ([live-pane-ids]
    (purge-expired-closed-sessions!
     (state-dir) live-pane-ids))
