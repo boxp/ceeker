@@ -78,10 +78,7 @@
    Strips ANSI escape sequences before measuring."
   [s]
   (if (seq s)
-    (let [plain (strip-ansi s)]
-      (if (seq plain)
-        (reduce + 0 (map char-display-width plain))
-        0))
+    (transduce (map char-display-width) + 0 (strip-ansi s))
     0))
 
 (defn- substr-by-width
@@ -237,7 +234,9 @@
         line-end "  └─"]
     (str/join "\n" (concat [line1 line2] msg-lines [line-end]))))
 
-(defn- display-mode-label [display-mode]
+(defn display-mode-label
+  "Returns display label for the given mode."
+  [display-mode]
   (case display-mode
     :auto "Auto"
     :table "Table"
@@ -322,8 +321,6 @@
   ([sessions sel terminal-width display-mode]
    (render sessions sel terminal-width display-mode
            f/empty-filter false nil))
-  ([sessions sel fs sm? sb]
-   (render sessions sel 120 :auto fs sm? sb))
   ([sessions sel terminal-width display-mode fs sm? sb]
    (let [width (or terminal-width 120)
          mode (or display-mode :auto)

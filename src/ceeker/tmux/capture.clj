@@ -110,6 +110,25 @@
     (and (str/starts-with? trimmed "\u203A")
          (not (re-find #"\u203A\s+\d+\." trimmed)))))
 
+(defn- detect-codex-running
+  "Returns running result if Codex activity found."
+  [tail]
+  (when (some codex-running-line? tail)
+    {:status :running :waiting-reason nil}))
+
+(defn- detect-codex-waiting
+  "Returns waiting result if dialog/approval found."
+  [tail]
+  (when (or (some question-dialog? tail)
+            (plan-approval-line? tail))
+    {:status :waiting :waiting-reason "respond"}))
+
+(defn- detect-codex-idle
+  "Returns idle result if Codex prompt is visible."
+  [non-blank]
+  (when (some codex-prompt-line? (take-last 5 non-blank))
+    {:status :idle :waiting-reason nil}))
+
 (defn detect-codex-state
   "Detects Codex agent state from captured pane lines.
    Returns map with :status and :waiting-reason,
@@ -117,20 +136,9 @@
   [lines]
   (let [non-blank (remove str/blank? lines)
         tail (take-last 30 non-blank)]
-    (cond
-      (some codex-running-line? tail)
-      {:status :running :waiting-reason nil}
-
-      (some question-dialog? tail)
-      {:status :waiting :waiting-reason "respond"}
-
-      (plan-approval-line? tail)
-      {:status :waiting :waiting-reason "respond"}
-
-      (some codex-prompt-line? (take-last 5 non-blank))
-      {:status :idle :waiting-reason nil}
-
-      :else nil)))
+    (or (detect-codex-running tail)
+        (detect-codex-waiting tail)
+        (detect-codex-idle non-blank))))
 
 ;; --- tmux capture-pane interface ---
 
