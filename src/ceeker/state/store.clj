@@ -140,7 +140,6 @@
                        (= key (supersede-key session)))
                 (merge session
                        {:agent-status :closed
-                        :last-message "superseded"
                         :superseded true
                         :last-updated now})
                 session)))
@@ -306,7 +305,6 @@
             (if (stale-active? session pane-cwds)
               (merge session
                      {:agent-status :closed
-                      :last-message "pane closed"
                       :last-updated now})
               session)))
    {}
@@ -405,7 +403,6 @@
                      (stale-pred sid session))
               (merge session
                      {:agent-status :closed
-                      :last-message "pane closed"
                       :last-updated now})
               session)))
    {}

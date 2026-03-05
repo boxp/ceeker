@@ -1,7 +1,9 @@
 (ns ceeker.tui.view
   "TUI rendering using ANSI escape sequences."
   (:require [ceeker.tui.filter :as f]
-            [clojure.string :as str]))
+            [clojure.string :as str])
+  (:import [java.time Instant ZoneId]
+           [java.time.format DateTimeFormatter]))
 
 (def ^:private ansi-reset "\033[0m")
 (def ^:private ansi-bold "\033[1m")
@@ -135,9 +137,24 @@
               (recur (rest chars) new-width
                      (conj current-line c) lines))))))))
 
-(defn- format-time [updated]
+(def ^:private local-zone
+  "System default time zone for display."
+  (ZoneId/systemDefault))
+
+(def ^:private time-formatter
+  "HH:mm:ss formatter for local time display."
+  (DateTimeFormatter/ofPattern "HH:mm:ss"))
+
+(defn- format-time
+  "Formats an ISO-8601 UTC timestamp to HH:mm:ss in local timezone."
+  [updated]
   (if (and updated (>= (count (str updated)) 19))
-    (subs (str updated) 11 19)
+    (try
+      (-> (Instant/parse (str updated))
+          (.atZone local-zone)
+          (.format time-formatter))
+      (catch Exception _
+        (or updated "")))
     (or updated "")))
 
 (defn- cwd-short-name [cwd]

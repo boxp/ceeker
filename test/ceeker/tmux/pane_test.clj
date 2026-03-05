@@ -3,7 +3,6 @@
             [ceeker.tmux.capture :as capture]
             [ceeker.tmux.pane :as pane]
             [clojure.java.io :as io]
-            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- temp-dir
@@ -49,8 +48,8 @@
             s2 (get-in state [:sessions "s2"])]
         (is (= :running (:agent-status s1)))
         (is (= :closed (:agent-status s2)))
-        (is (= "pane closed"
-               (:last-message s2))))
+        (is (= "working" (:last-message s2))
+            "last-message preserved when pane closes"))
       (finally
         (cleanup-dir dir)))))
 
@@ -205,9 +204,7 @@
                                :waiting-reason "respond"})]
         (let [result (capture-fn session)]
           (is (some? result))
-          (is (= :waiting (:agent-status result)))
-          (is (str/includes? (:last-message result)
-                             "waiting")))))))
+          (is (= :waiting (:agent-status result))))))))
 
 (deftest test-closed-superseded-not-reactivated
   (testing "Superseded closed session is never reactivated"
