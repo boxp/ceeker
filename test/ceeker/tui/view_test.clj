@@ -356,3 +356,97 @@
           line (#'view/format-session-line session false 0)
           plain (strip-ansi line)]
       (is (not (str/includes? plain "\n"))))))
+
+;; -- strip-ansi tests --
+
+(deftest test-strip-ansi
+  (testing "removes ANSI color codes"
+    (is (= "[Claude]"
+           (#'view/strip-ansi "\033[36m[Claude]\033[0m"))))
+  (testing "removes bold and dim codes"
+    (is (= "hello" (#'view/strip-ansi "\033[1mhello\033[0m"))))
+  (testing "plain text unchanged"
+    (is (= "hello" (#'view/strip-ansi "hello"))))
+  (testing "nil/empty"
+    (is (= "" (#'view/strip-ansi nil)))
+    (is (= "" (#'view/strip-ansi "")))))
+
+;; -- str-display-width with ANSI --
+
+(deftest test-str-display-width-ignores-ansi
+  (testing "ANSI codes are excluded from width calculation"
+    (is (= 8 (#'view/str-display-width
+              "\033[36m[Claude]\033[0m")))
+    (is (= 9 (#'view/str-display-width
+              "\033[32m● Running\033[0m")))
+    (is (= 8 (#'view/str-display-width
+              "\033[2m✕ Closed\033[0m")))))
+
+;; -- table column alignment tests --
+
+(deftest test-table-columns-aligned
+  (testing "all session rows have same column positions as header"
+    (let [sessions [(assoc (make-session "msg one")
+                           :agent-type :claude-code
+                           :agent-status :running)
+                    (assoc (make-session "msg two")
+                           :session-id "short"
+                           :agent-type :codex
+                           :agent-status :closed)
+                    (assoc (make-session "日本語メッセージ")
+                           :session-id "cjk-session"
+                           :agent-type :claude-code
+                           :agent-status :waiting)]
+          header (#'view/column-headers)
+          header-plain (strip-ansi header)
+          lines (map #(#'view/format-session-line % false 0)
+                     sessions)]
+      (is (>= (count (str/split (str/trim header-plain)
+                                #"\s{2,}"))
+              5)
+          "Header should have at least 5 columns")
+      (doseq [line lines]
+        (is (not (str/includes? (strip-ansi line) "\n")))))))
+
+(deftest test-table-columns-aligned-different-agent-types
+  (testing "claude-code and codex badges produce same column offset"
+    (let [s-claude (assoc (make-session "hello")
+                          :agent-type :claude-code
+                          :agent-status :running)
+          s-codex (assoc (make-session "hello")
+                         :agent-type :codex
+                         :agent-status :running)
+          line-claude (strip-ansi
+                       (#'view/format-session-line
+                        s-claude false 0))
+          line-codex (strip-ansi
+                      (#'view/format-session-line
+                       s-codex false 0))
+          ;; Find position of STATUS column content
+          ;; (Running appears after AGENT badge)
+          claude-running-pos (str/index-of
+                              line-claude "Running")
+          codex-running-pos (str/index-of
+                             line-codex "Running")]
+      (is (some? claude-running-pos))
+      (is (some? codex-running-pos))
+      (is (= claude-running-pos codex-running-pos)
+          "STATUS column should start at same position regardless of agent type"))))
+
+(deftest test-table-columns-aligned-different-statuses
+  (testing "different status badges produce same WORKTREE column offset"
+    (let [statuses [:running :waiting :completed :closed
+                    :error :idle]
+          lines (map (fn [status]
+                       (let [s (assoc (make-session "msg")
+                                      :agent-status status)]
+                         (strip-ansi
+                          (#'view/format-session-line
+                           s false 0))))
+                     statuses)
+          ;; Find the position of "project" (cwd-short-name)
+          positions (map #(str/index-of % "project") lines)]
+      (is (every? some? positions)
+          "All lines should contain the worktree name")
+      (is (apply = positions)
+          "WORKTREE column should start at same position for all statuses"))))

@@ -524,3 +524,205 @@
           (is (false? applied)))
         (finally
           (cleanup-dir dir))))))
+
+;; --- reactivate-closed-session! tests ---
+
+(deftest test-reactivate-closed-non-superseded
+  (testing "Closed non-superseded session can be reactivated"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "working"})
+        ;; Close it via stale detection
+        (store/close-stale-sessions! dir #{})
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "s1"])]
+          (is (= :closed (:agent-status s))))
+        ;; Reactivate it
+        (let [applied (store/reactivate-closed-session!
+                       dir "s1"
+                       {:agent-status :running
+                        :last-message "reactivated: running"
+                        :last-updated
+                        (.toString
+                         (java.time.Instant/now))})]
+          (is (true? applied))
+          (let [s (get-in (store/read-sessions dir)
+                          [:sessions "s1"])]
+            (is (= :running (:agent-status s)))
+            (is (= "reactivated: running"
+                   (:last-message s)))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-reactivate-superseded-blocked
+  (testing "Superseded closed session cannot be reactivated"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "old"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "working"})
+        (store/update-session!
+         dir "new"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "resumed"})
+        ;; old is superseded
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "old"])]
+          (is (true? (:superseded s))))
+        ;; Reactivate attempt should fail
+        (let [applied (store/reactivate-closed-session!
+                       dir "old"
+                       {:agent-status :running
+                        :last-message "reactivated"})]
+          (is (false? applied))
+          (let [s (get-in (store/read-sessions dir)
+                          [:sessions "old"])]
+            (is (= :closed (:agent-status s)))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-reactivate-running-session-noop
+  (testing "Running session is not reactivated (already active)"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :last-message "working"})
+        (let [applied (store/reactivate-closed-session!
+                       dir "s1"
+                       {:agent-status :running
+                        :last-message "reactivated"})]
+          (is (false? applied))
+          (let [s (get-in (store/read-sessions dir)
+                          [:sessions "s1"])]
+            (is (= :running (:agent-status s)))
+            (is (= "working" (:last-message s)))))
+        (finally
+          (cleanup-dir dir))))))
+
+;; --- purge-expired-closed-sessions! tests ---
+
+(deftest test-purge-expired-closed-sessions
+  (testing "Expired closed sessions are purged when pane is gone"
+    (let [dir (temp-dir)]
+      (try
+        ;; Create a closed session with old timestamp
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :closed
+          :cwd "/tmp/gone"
+          :pane-id "%42"
+          :last-message "pane closed"
+          :last-updated (.toString
+                         (.minusSeconds
+                          (java.time.Instant/now) 600))})
+        ;; Create a running session
+        (store/update-session!
+         dir "s2"
+         {:agent-type :codex
+          :agent-status :running
+          :cwd "/tmp/alive"
+          :pane-id "%99"
+          :last-message "working"})
+        ;; Purge with no live pane-ids
+        (store/purge-expired-closed-sessions!
+         dir #{} 1000)
+        (let [state (store/read-sessions dir)]
+          (is (nil? (get-in state [:sessions "s1"]))
+              "Expired closed session should be purged")
+          (is (some? (get-in state [:sessions "s2"]))
+              "Running session should remain"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-purge-keeps-recent-closed
+  (testing "Recently closed sessions are not purged"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :closed
+          :cwd "/tmp/gone"
+          :pane-id "%42"
+          :last-message "pane closed"
+          :last-updated (.toString
+                         (java.time.Instant/now))})
+        (store/purge-expired-closed-sessions!
+         dir #{} 300000)
+        (let [state (store/read-sessions dir)]
+          (is (some? (get-in state [:sessions "s1"]))
+              "Recently closed session should not be purged"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-purge-keeps-superseded-sessions
+  (testing "Superseded closed sessions are never purged"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "old"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "working"})
+        (store/update-session!
+         dir "new"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "resumed"})
+        ;; old is now superseded+closed
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "old"])]
+          (is (= :closed (:agent-status s)))
+          (is (true? (:superseded s))))
+        ;; Purge with 0 TTL and no live panes
+        (store/purge-expired-closed-sessions!
+         dir #{} 0)
+        (let [state (store/read-sessions dir)]
+          (is (some? (get-in state [:sessions "old"]))
+              "Superseded session must not be purged"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-purge-keeps-closed-with-live-pane
+  (testing "Closed session with live pane-id is not purged"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :closed
+          :cwd "/tmp/gone"
+          :pane-id "%42"
+          :last-message "pane closed"
+          :last-updated (.toString
+                         (.minusSeconds
+                          (java.time.Instant/now) 600))})
+        (store/purge-expired-closed-sessions!
+         dir #{"%42"} 1000)
+        (let [state (store/read-sessions dir)]
+          (is (some? (get-in state [:sessions "s1"]))
+              "Closed session with live pane should not be purged"))
+        (finally
+          (cleanup-dir dir))))))

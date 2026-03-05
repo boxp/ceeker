@@ -131,12 +131,19 @@
 (defn- session-has-live-agent?
   "Checks if a session's agent is alive by searching the
    process tree of matching tmux panes.
+   Prefers pane-id match over cwd-only match.
    Returns :alive, :dead, or :unknown."
   [session pane-infos]
-  (let [cwd (:cwd session)
+  (let [pane-id (:pane-id session)
+        cwd (:cwd session)
         agent-type (:agent-type session)
-        matching-panes (filter #(= cwd (:cwd %))
-                               pane-infos)
+        by-pane-id (when (seq pane-id)
+                     (filter #(= pane-id (:pane-id %))
+                             pane-infos))
+        matching-panes (if (seq by-pane-id)
+                         by-pane-id
+                         (filter #(= cwd (:cwd %))
+                                 pane-infos))
         results (map #(find-agent-in-tree
                        (:pid %) agent-type)
                      matching-panes)]
@@ -145,21 +152,38 @@
       (some #{:unknown} results) :unknown
       :else :dead)))
 
+(defn- pane-id-exists?
+  "Returns true if pane-id is found in pane-infos."
+  [pane-id pane-infos]
+  (some #(= pane-id (:pane-id %)) pane-infos))
+
 (defn- stale-session?
   "Returns true if the session is stale given pane state.
    Conservative: returns false when liveness is unknown.
+   When a session has a pane-id and that pane still exists,
+   uses process-tree check even if cwd changed.
    Skips process-tree check when session has no pane-id
    (started outside tmux)."
   [session pane-cwds pane-infos]
-  (and (seq (:cwd session))
-       (if (not (contains? pane-cwds (:cwd session)))
-         true
-         (and (seq (:pane-id session))
-              (= :dead (session-has-live-agent?
-                        session pane-infos))))))
+  (let [cwd (:cwd session)
+        pane-id (:pane-id session)
+        cwd-present? (contains? pane-cwds cwd)
+        pane-exists? (and (seq pane-id)
+                          (pane-id-exists? pane-id pane-infos))]
+    (and (seq cwd)
+         (cond
+           pane-exists?
+           (= :dead (session-has-live-agent?
+                     session pane-infos))
+           (not cwd-present?) true
+           (seq pane-id)
+           (= :dead (session-has-live-agent?
+                     session pane-infos))
+           :else false))))
 
 (defn close-stale-sessions!
   "Checks running sessions and marks stale ones as closed.
+   Also purges expired closed sessions whose pane is gone.
    Atomically updates all stale sessions under file lock.
    Does nothing if tmux is unavailable (nil)."
   ([] (close-stale-sessions! nil))
@@ -167,13 +191,18 @@
    (let [pane-infos (list-pane-info)]
      (when (some? pane-infos)
        (let [pane-cwds (set (map :cwd pane-infos))
+             pane-ids (set (map :pane-id pane-infos))
              pred (fn [_sid session]
                     (stale-session?
                      session pane-cwds pane-infos))]
          (if state-dir
-           (store/close-sessions-by-pred!
-            state-dir pred)
-           (store/close-sessions-by-pred! pred)))))))
+           (do (store/close-sessions-by-pred!
+                state-dir pred)
+               (store/purge-expired-closed-sessions!
+                state-dir pane-ids))
+           (do (store/close-sessions-by-pred! pred)
+               (store/purge-expired-closed-sessions!
+                pane-ids))))))))
 
 (def ^:private debounce-ms
   "Minimum time (ms) since last hook update before
@@ -222,10 +251,41 @@
          :last-updated (.toString
                         (java.time.Instant/now))}))))
 
+(def ^:private reactivatable-statuses
+  "Statuses that justify reopening a closed session.
+   :idle alone is excluded because detect-agent-state can
+   classify a plain shell prompt as :idle even when no agent
+   process is present, causing closed->idle flapping."
+  #{:running :waiting})
+
+(defn- capture-state-for-closed-session
+  "Detects state for a closed (non-superseded) session.
+   Returns updated session data only when the agent is
+   actively running or waiting, not merely idle."
+  [session]
+  (when (and (= :closed (:agent-status session))
+             (not (:superseded session))
+             (seq (:pane-id session)))
+    (when-let [detected (capture/detect-agent-state
+                         (:pane-id session)
+                         (:agent-type session))]
+      (when (contains? reactivatable-statuses
+                       (:status detected))
+        {:agent-status (:status detected)
+         :last-message (if (:waiting-reason detected)
+                         (str "waiting: "
+                              (:waiting-reason detected))
+                         (str "reactivated: "
+                              (name (:status detected))))
+         :last-updated (.toString
+                        (java.time.Instant/now))}))))
+
 (defn refresh-session-states!
   "Refreshes active session states via capture-pane.
    Processes sessions in :running, :idle, and :waiting
    so intermediate transitions are continuously tracked.
+   Also checks closed (non-superseded) sessions for agent
+   reactivation in their pane.
    Uses update-session-if-active! to atomically verify
    the session is still active before writing, preventing
    overwrite of newer hook-driven state transitions."
@@ -236,10 +296,18 @@
                  (store/read-sessions))
          sessions (:sessions state)]
      (doseq [[sid session] sessions]
-       (when-let [update-data
-                  (capture-state-for-session session)]
+       (if-let [update-data
+                (capture-state-for-session session)]
          (if state-dir
            (store/update-session-if-active!
             state-dir sid update-data)
            (store/update-session-if-active!
-            sid update-data)))))))
+            sid update-data))
+         (when-let [reactivate-data
+                    (capture-state-for-closed-session
+                     session)]
+           (if state-dir
+             (store/reactivate-closed-session!
+              state-dir sid reactivate-data)
+             (store/reactivate-closed-session!
+              sid reactivate-data))))))))
