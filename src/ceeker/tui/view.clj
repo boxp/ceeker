@@ -205,17 +205,18 @@
     (mapv (fn [line] (str sel-start "  │ " line sel-end)) final)))
 
 (defn- format-session-card
-  "Formats a single session as a compact card for narrow terminals."
+  "Formats a single session as a compact card for narrow terminals.
+   Selection highlight is applied only to the header row (line1)."
   [session selected? _index width]
   (let [content-width (max 10 (- width 4))
         sel-start (if selected? ansi-reverse "")
         sel-end (if selected? ansi-reset "")
         line1 (card-line1 session selected? sel-start sel-end)
-        line2 (card-line2 session sel-start sel-end content-width)
+        line2 (card-line2 session "" "" content-width)
         msg-lines (card-message-lines
                    (:last-message session) content-width
-                   sel-start sel-end)
-        line-end (str sel-start "  └─" sel-end)]
+                   "" "")
+        line-end "  └─"]
     (str/join "\n" (concat [line1 line2] msg-lines [line-end]))))
 
 (defn- display-mode-label [display-mode]
