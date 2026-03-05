@@ -178,3 +178,46 @@
                    :agent-status :running}
           result (#'ceeker.tui.app/tmux-jump! session)]
       (is (nil? result)))))
+
+;; --- a/s key filter toggle tests (regression for PersistentVector crash) ---
+
+(deftest test-filter-key-a-toggles-agent
+  (testing "pressing 'a' toggles agent filter without crash"
+    (let [result (#'ceeker.tui.app/filter-key-result
+                  \a f/empty-filter)]
+      (is (some? result))
+      (is (= 0 (:sel result)))
+      (is (= :claude-code (get-in result [:fs :agent-filter]))))))
+
+(deftest test-filter-key-s-toggles-status
+  (testing "pressing 's' toggles status filter without crash"
+    (let [result (#'ceeker.tui.app/filter-key-result
+                  \s f/empty-filter)]
+      (is (some? result))
+      (is (= 0 (:sel result)))
+      (is (= :running (get-in result [:fs :status-filter]))))))
+
+(deftest test-filter-key-a-full-cycle-no-crash
+  (testing "'a' key cycles through all agent filters without crashing"
+    (let [r1 (#'ceeker.tui.app/filter-key-result
+              \a f/empty-filter)
+          r2 (#'ceeker.tui.app/filter-key-result
+              \a (:fs r1))
+          r3 (#'ceeker.tui.app/filter-key-result
+              \a (:fs r2))]
+      (is (= :claude-code (get-in r1 [:fs :agent-filter])))
+      (is (= :codex (get-in r2 [:fs :agent-filter])))
+      (is (nil? (get-in r3 [:fs :agent-filter]))))))
+
+(deftest test-filter-key-s-full-cycle-no-crash
+  (testing "'s' key cycles through all status filters without crashing"
+    (loop [fs f/empty-filter
+           expected [nil :running :completed :error
+                     :waiting :idle nil]
+           i 0]
+      (when (< i (count expected))
+        (is (= (nth expected i) (:status-filter fs))
+            (str "iteration " i))
+        (let [r (#'ceeker.tui.app/filter-key-result
+                 \s fs)]
+          (recur (:fs r) expected (inc i)))))))

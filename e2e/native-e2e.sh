@@ -280,6 +280,79 @@ test_tui_search_escape() {
   fi
 }
 
+# --- Test 6: TUI filter keys (a, s, q) - regression test for PersistentVector crash ---
+test_tui_filter_keys() {
+  log "Test: TUI filter keys: a -> s -> q (PersistentVector crash regression)"
+  local stderr_file="${TMPDIR_E2E}/tui-filter.stderr"
+  local exit_marker="${TMPDIR_E2E}/tui-filter.exit"
+
+  tmux kill-session -t ceeker-e2e 2>/dev/null || true
+
+  tmux new-session -d -s ceeker-e2e -x 120 -y 40 \
+    "XDG_RUNTIME_DIR='${TMPDIR_E2E}' '${BINARY}' 2>'${stderr_file}'; echo \$? > '${exit_marker}'"
+
+  if ! wait_for_tui_ready; then
+    if [ -f "$exit_marker" ]; then
+      local code
+      code="$(cat "$exit_marker")"
+      fail "TUI filter" "binary exited early with code $code"
+    else
+      fail "TUI filter" "TUI did not render within ${TUI_READY_TIMEOUT}s"
+    fi
+    collect_diagnostics "tui-filter"
+    tmux kill-session -t ceeker-e2e 2>/dev/null || true
+    return
+  fi
+
+  # Press 'a' to cycle agent filter (nil -> claude-code)
+  tmux send-keys -t ceeker-e2e a
+  sleep 1
+
+  # Verify TUI is still alive (did not crash on 'a')
+  if ! tmux has-session -t ceeker-e2e 2>/dev/null; then
+    fail "TUI filter" "'a' key crashed the binary"
+    collect_diagnostics "tui-filter"
+    return
+  fi
+
+  # Press 'a' again to cycle (claude-code -> codex)
+  tmux send-keys -t ceeker-e2e a
+  sleep 1
+
+  # Press 's' to cycle status filter (nil -> running)
+  tmux send-keys -t ceeker-e2e s
+  sleep 1
+
+  # Verify TUI is still alive (did not crash on 's')
+  if ! tmux has-session -t ceeker-e2e 2>/dev/null; then
+    fail "TUI filter" "'s' key crashed the binary"
+    collect_diagnostics "tui-filter"
+    return
+  fi
+
+  # Press 's' again to cycle (running -> completed)
+  tmux send-keys -t ceeker-e2e s
+  sleep 1
+
+  # Quit
+  tmux send-keys -t ceeker-e2e q
+
+  if wait_for_exit "$exit_marker"; then
+    local code
+    code="$(cat "$exit_marker")"
+    if [ "$code" = "0" ]; then
+      pass "TUI filter keys work: a -> a -> s -> s -> q"
+    else
+      fail "TUI filter" "exit code $code"
+      collect_diagnostics "tui-filter"
+    fi
+  else
+    fail "TUI filter" "timed out waiting for exit after ${TUI_EXIT_TIMEOUT}s"
+    collect_diagnostics "tui-filter"
+    tmux kill-session -t ceeker-e2e 2>/dev/null || true
+  fi
+}
+
 # --- Run all tests ---
 log "Running ceeker native-image E2E tests"
 echo "  Binary: $BINARY"
@@ -292,6 +365,7 @@ test_hook_claude
 test_hook_codex
 test_tui_start_quit
 test_tui_search_escape
+test_tui_filter_keys
 
 echo ""
 log "Results: $PASS passed, $FAIL failed"

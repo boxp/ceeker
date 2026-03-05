@@ -182,3 +182,37 @@
     (let [fs (f/set-search-query f/empty-filter
                                  "  test  ")]
       (is (= "test" (:search-query fs))))))
+
+(deftest test-toggle-agent-filter-full-cycle
+  (testing "full agent cycle does not throw on PersistentVector"
+    (let [f0 f/empty-filter
+          f1 (f/toggle-agent-filter f0)
+          f2 (f/toggle-agent-filter f1)
+          f3 (f/toggle-agent-filter f2)
+          f4 (f/toggle-agent-filter f3)]
+      (is (nil? (:agent-filter f0)))
+      (is (= :claude-code (:agent-filter f1)))
+      (is (= :codex (:agent-filter f2)))
+      (is (nil? (:agent-filter f3)) "wraps back to nil")
+      (is (= :claude-code (:agent-filter f4))
+          "second cycle starts correctly"))))
+
+(deftest test-toggle-status-filter-full-cycle
+  (testing "full status cycle does not throw on PersistentVector"
+    (let [f0 f/empty-filter
+          f1 (f/toggle-status-filter f0)
+          f2 (f/toggle-status-filter f1)
+          f3 (f/toggle-status-filter f2)
+          f4 (f/toggle-status-filter f3)
+          f5 (f/toggle-status-filter f4)
+          f6 (f/toggle-status-filter f5)
+          f7 (f/toggle-status-filter f6)]
+      (is (nil? (:status-filter f0)))
+      (is (= :running (:status-filter f1)))
+      (is (= :completed (:status-filter f2)))
+      (is (= :error (:status-filter f3)))
+      (is (= :waiting (:status-filter f4)))
+      (is (= :idle (:status-filter f5)))
+      (is (nil? (:status-filter f6)) "wraps back to nil")
+      (is (= :running (:status-filter f7))
+          "second cycle starts correctly"))))
