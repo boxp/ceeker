@@ -44,6 +44,9 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.arch }}-clojure-${{ hashFiles('deps.edn') }}
           restore-keys: ${{ runner.os }}-${{ matrix.arch }}-clojure-
 
+      - name: Stamp version from tag
+        run: echo "${GITHUB_REF_NAME#v}" > resources/CEEKER_VERSION
+
       - name: Build uberjar
         run: clojure -T:build uber
 
@@ -200,10 +203,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           BRANCH="update-ceeker-${VERSION}"
-          git checkout -b "$BRANCH"
+          git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
           git add Formula/ceeker.rb
-          git commit -m "ceeker ${VERSION}"
-          git push origin "$BRANCH"
+          git commit -m "ceeker ${VERSION}" --allow-empty
+          git push origin "$BRANCH" --force-with-lease
 
           gh pr create \
             --repo boxp/homebrew-tap \
