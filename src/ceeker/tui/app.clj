@@ -111,15 +111,6 @@
     :card :auto
     :auto))
 
-(defn- display-mode-label
-  "Returns display label for the current mode."
-  [mode]
-  (case mode
-    :auto "Auto"
-    :table "Table"
-    :card "Card"
-    "Auto"))
-
 (defn- render-screen
   "Renders the screen with sessions and message."
   [sessions sel filt sm? sb msg terminal-width display-mode]
@@ -182,7 +173,7 @@
       {:sel sel :fs fs :dm new-mode
        :msg (view/render-message
              (str "View: "
-                  (display-mode-label new-mode)))})
+                  (view/display-mode-label new-mode)))})
     :else nil))
 
 (defn- filter-key-result
@@ -221,10 +212,8 @@
   "Waits for key or file change, returns key or nil.
    Returns nil after a single 500ms poll to allow periodic tasks."
   [terminal w]
-  (let [key (input/read-key terminal 500)]
-    (cond
-      (some? key) key
-      :else (do (when w (watcher/poll-change w 0)) nil))))
+  (or (input/read-key terminal 500)
+      (do (when w (watcher/poll-change w 0)) nil)))
 
 (defn- create-watcher-for
   "Creates a watcher for the given state dir.
