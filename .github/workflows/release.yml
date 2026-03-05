@@ -98,6 +98,9 @@ jobs:
   notify-homebrew-tap:
     needs: release
     runs-on: ubuntu-latest
+    concurrency:
+      group: notify-homebrew-tap-${{ github.ref_name }}
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
