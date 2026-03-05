@@ -94,3 +94,71 @@ jobs:
           files: |
             release/*.tar.gz
             release/checksums.txt
+
+  notify-homebrew-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    concurrency:
+      group: notify-homebrew-tap-${{ github.ref_name }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release tarballs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p tarballs
+          for platform in linux-amd64 linux-arm64 darwin-arm64; do
+            gh release download "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "ceeker-${platform}.tar.gz" \
+              --dir tarballs
+          done
+
+      - name: Compute SHA256 checksums
+        id: sha
+        run: |
+          for platform in linux-amd64 linux-arm64 darwin-arm64; do
+            file="tarballs/ceeker-${platform}.tar.gz"
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing tarball: $file"
+              exit 1
+            fi
+            sha=$(sha256sum "$file" | awk '{print $1}')
+            key="sha_$(echo "$platform" | tr '-' '_')"
+            echo "${key}=${sha}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Dispatch to homebrew-tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          SHA_DARWIN_ARM64: ${{ steps.sha.outputs.sha_darwin_arm64 }}
+          SHA_LINUX_AMD64: ${{ steps.sha.outputs.sha_linux_amd64 }}
+          SHA_LINUX_ARM64: ${{ steps.sha.outputs.sha_linux_arm64 }}
+          SENDER: ${{ github.repository }}
+        run: |
+          jq -n \
+            --arg version "$VERSION" \
+            --arg tag "$TAG" \
+            --arg sha_darwin_arm64 "$SHA_DARWIN_ARM64" \
+            --arg sha_linux_amd64 "$SHA_LINUX_AMD64" \
+            --arg sha_linux_arm64 "$SHA_LINUX_ARM64" \
+            --arg sender "$SENDER" \
+            '{
+              event_type: "update-ceeker-formula",
+              client_payload: {
+                version: $version,
+                tag: $tag,
+                sha_darwin_arm64: $sha_darwin_arm64,
+                sha_linux_amd64: $sha_linux_amd64,
+                sha_linux_arm64: $sha_linux_arm64,
+                sender: $sender
+              }
+            }' | gh api repos/boxp/homebrew-tap/dispatches --method POST --input -
