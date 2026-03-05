@@ -170,8 +170,8 @@
          sfx)))
 
 (defn- card-line1 [session selected? sel-start sel-end]
-  (str sel-start
-       "  ┌ " (truncate (:session-id session) 12)
+  (str "  ┌ " sel-start
+       (truncate (:session-id session) 12)
        " " (agent-badge (:agent-type session))
        (when selected? ansi-reverse)
        " " (status-badge (:agent-status session))

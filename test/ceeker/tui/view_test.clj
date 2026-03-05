@@ -237,6 +237,54 @@
       (is (some #(str/includes? % "first line second line")
                 plain-lines)))))
 
+(deftest test-format-session-card-selection-highlight-header-only
+  (testing "selected card applies reverse video only to header row (line1)"
+    (let [card (#'view/format-session-card
+                (make-session "some message") true 0 60)
+          lines (str/split card #"\n")
+          reverse-code "\033[7m"]
+      (is (str/includes? (first lines) reverse-code)
+          "line1 (header) should contain ansi-reverse when selected")
+      (doseq [line (rest lines)]
+        (is (not (str/includes? line reverse-code))
+            (str "non-header line should not contain ansi-reverse: "
+                 (pr-str (strip-ansi line)))))))
+  (testing "unselected card has no reverse video on any line"
+    (let [card (#'view/format-session-card
+                (make-session "some message") false 0 60)
+          lines (str/split card #"\n")
+          reverse-code "\033[7m"]
+      (doseq [line lines]
+        (is (not (str/includes? line reverse-code))
+            (str "unselected card line should not contain ansi-reverse: "
+                 (pr-str (strip-ansi line))))))))
+
+(deftest test-card-line1-highlight-excludes-border
+  (testing "selected card header: left border is NOT highlighted"
+    (let [card (#'view/format-session-card
+                (make-session "msg") true 0 60)
+          line1 (first (str/split card #"\n"))
+          reverse-code "\033[7m"
+          ;; Find the position of the reverse code and the border
+          rev-idx (str/index-of line1 reverse-code)
+          border-idx (str/index-of line1 "┌")]
+      (is (some? rev-idx)
+          "line1 must contain ansi-reverse")
+      (is (some? border-idx)
+          "line1 must contain border character ┌")
+      (is (> rev-idx border-idx)
+          "ansi-reverse must appear AFTER the border character ┌")))
+  (testing "selected card header: session id gets highlighted"
+    (let [card (#'view/format-session-card
+                (make-session "msg") true 0 60)
+          line1 (first (str/split card #"\n"))
+          reverse-code "\033[7m"
+          rev-idx (str/index-of line1 reverse-code)
+          id-idx (str/index-of line1 "test123")]
+      (is (some? rev-idx))
+      (is (some? id-idx))
+      (is (< rev-idx id-idx)
+          "ansi-reverse must appear BEFORE the session id"))))
 ;; -- normalize-message tests --
 
 (deftest test-normalize-message
