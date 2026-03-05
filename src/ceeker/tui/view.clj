@@ -80,10 +80,7 @@
    Strips ANSI escape sequences before measuring."
   [s]
   (if (seq s)
-    (let [plain (strip-ansi s)]
-      (if (seq plain)
-        (reduce + 0 (map char-display-width plain))
-        0))
+    (transduce (map char-display-width) + 0 (strip-ansi s))
     0))
 
 (defn- substr-by-width
@@ -137,21 +134,20 @@
               (recur (rest chars) new-width
                      (conj current-line c) lines))))))))
 
-(def ^:private local-zone
-  "System default time zone for display."
-  (ZoneId/systemDefault))
-
 (def ^:private time-formatter
-  "HH:mm:ss formatter for local time display."
+  "HH:mm:ss formatter for local time display.
+   Immutable and safe to initialize at build time."
   (DateTimeFormatter/ofPattern "HH:mm:ss"))
 
 (defn- format-time
-  "Formats an ISO-8601 UTC timestamp to HH:mm:ss in local timezone."
+  "Formats an ISO-8601 UTC timestamp to HH:mm:ss in local timezone.
+   Resolves the system timezone at runtime to avoid baking the build
+   machine's timezone into GraalVM native images."
   [updated]
   (if (and updated (>= (count (str updated)) 19))
     (try
       (-> (Instant/parse (str updated))
-          (.atZone local-zone)
+          (.atZone (ZoneId/systemDefault))
           (.format time-formatter))
       (catch Exception _
         (or updated "")))
@@ -254,7 +250,9 @@
         line-end "  └─"]
     (str/join "\n" (concat [line1 line2] msg-lines [line-end]))))
 
-(defn- display-mode-label [display-mode]
+(defn display-mode-label
+  "Returns display label for the given mode."
+  [display-mode]
   (case display-mode
     :auto "Auto"
     :table "Table"
@@ -339,8 +337,6 @@
   ([sessions sel terminal-width display-mode]
    (render sessions sel terminal-width display-mode
            f/empty-filter false nil))
-  ([sessions sel fs sm? sb]
-   (render sessions sel 120 :auto fs sm? sb))
   ([sessions sel terminal-width display-mode fs sm? sb]
    (let [width (or terminal-width 120)
          mode (or display-mode :auto)

@@ -101,6 +101,22 @@
     :codex #"(?i)codex"
     #"(?i)claude|codex"))
 
+(declare find-agent-in-tree)
+
+(defn- search-children
+  "Searches child processes for an agent, returning the best
+   result across all children via single-pass reduce."
+  [children agent-type max-depth]
+  (reduce (fn [best child]
+            (let [r (find-agent-in-tree
+                     child agent-type max-depth)]
+              (case r
+                :found (reduced :found)
+                :unknown :unknown
+                best)))
+          :not-found
+          children))
+
 (defn find-agent-in-tree
   "Searches the process tree rooted at pid for an agent
    process matching the given agent-type.
@@ -119,14 +135,9 @@
          (let [children (child-pids pid)]
            (if (nil? children)
              :unknown
-             (let [results (map #(find-agent-in-tree
-                                  % agent-type
-                                  (dec max-depth))
-                                children)]
-               (cond
-                 (some #{:found} results) :found
-                 (some #{:unknown} results) :unknown
-                 :else :not-found)))))))))
+             (search-children
+              children agent-type
+              (dec max-depth)))))))))
 
 (defn- session-has-live-agent?
   "Checks if a session's agent is alive by searching the
@@ -190,8 +201,8 @@
   ([state-dir]
    (let [pane-infos (list-pane-info)]
      (when (some? pane-infos)
-       (let [pane-cwds (set (map :cwd pane-infos))
-             pane-ids (set (map :pane-id pane-infos))
+       (let [pane-cwds (into #{} (map :cwd) pane-infos)
+             pane-ids (into #{} (map :pane-id) pane-infos)
              pred (fn [_sid session]
                     (stale-session?
                      session pane-cwds pane-infos))]

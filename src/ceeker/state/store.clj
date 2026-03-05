@@ -132,19 +132,19 @@
    as the new session, excluding the new session itself."
   [sessions session-id session-data now]
   (if-let [key (supersede-key session-data)]
-    (reduce-kv
-     (fn [m sid session]
-       (assoc m sid
-              (if (and (not= sid session-id)
-                       (= :running (:agent-status session))
-                       (= key (supersede-key session)))
-                (merge session
-                       {:agent-status :closed
-                        :superseded true
-                        :last-updated now})
-                session)))
-     {}
-     sessions)
+    (let [supersede-data {:agent-status :closed
+                          :last-message "superseded"
+                          :superseded true
+                          :last-updated now}]
+      (reduce-kv
+       (fn [m sid session]
+         (if (and (not= sid session-id)
+                  (= :running (:agent-status session))
+                  (= key (supersede-key session)))
+           (assoc m sid (merge session supersede-data))
+           m))
+       sessions
+       sessions))
     sessions))
 
 (defn- should-supersede?
@@ -299,16 +299,14 @@
 (defn- mark-stale-sessions
   "Returns updated sessions map with stale ones closed."
   [sessions pane-cwds now]
-  (reduce-kv
-   (fn [m sid session]
-     (assoc m sid
-            (if (stale-active? session pane-cwds)
-              (merge session
-                     {:agent-status :closed
-                      :last-updated now})
-              session)))
-   {}
-   sessions))
+  (let [close-data {:agent-status :closed
+                    :last-message "pane closed"
+                    :last-updated now}]
+    (update-vals sessions
+                 (fn [session]
+                   (if (stale-active? session pane-cwds)
+                     (merge session close-data)
+                     session)))))
 
 (defn close-stale-sessions!
   "Marks active sessions as :closed when their cwd
@@ -395,18 +393,18 @@
   "Returns updated sessions map, closing active sessions
    for which stale-pred returns true."
   [sessions stale-pred now]
-  (reduce-kv
-   (fn [m sid session]
-     (assoc m sid
-            (if (and (contains? capturable-statuses
-                                (:agent-status session))
-                     (stale-pred sid session))
-              (merge session
-                     {:agent-status :closed
-                      :last-updated now})
-              session)))
-   {}
-   sessions))
+  (let [close-data {:agent-status :closed
+                    :last-message "pane closed"
+                    :last-updated now}]
+    (reduce-kv
+     (fn [m sid session]
+       (if (and (contains? capturable-statuses
+                           (:agent-status session))
+                (stale-pred sid session))
+         (assoc m sid (merge session close-data))
+         m))
+     sessions
+     sessions)))
 
 (defn close-sessions-by-pred!
   "Atomically marks active sessions as :closed when
