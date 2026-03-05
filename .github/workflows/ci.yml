@@ -7,6 +7,7 @@ on:
       - 'src/**'
       - 'test/**'
       - 'e2e/**'
+      - 'resources/**'
       - 'deps.edn'
       - 'build.clj'
       - '.clj-kondo/**'
@@ -17,6 +18,7 @@ on:
       - 'src/**'
       - 'test/**'
       - 'e2e/**'
+      - 'resources/**'
       - 'deps.edn'
       - 'build.clj'
       - '.clj-kondo/**'
@@ -100,11 +102,7 @@ jobs:
         run: |
           native-image \
             -jar target/ceeker.jar \
-            -o ceeker \
-            --no-fallback \
-            --initialize-at-build-time \
-            --initialize-at-run-time=org.jline.nativ \
-            -H:+ReportExceptionStackTraces
+            -o ceeker
 
       - name: Install tmux
         run: sudo apt-get install -y tmux

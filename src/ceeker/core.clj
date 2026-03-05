@@ -2,12 +2,18 @@
   "Entry point for ceeker CLI."
   (:require [ceeker.hook.handler :as hook]
             [ceeker.tui.app :as tui]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.cli :as cli])
   (:gen-class))
 
+(def version
+  (or (some-> (io/resource "CEEKER_VERSION") slurp str/trim)
+      "dev"))
+
 (def cli-options
-  [["-h" "--help" "Show help"]])
+  [["-h" "--help" "Show help"]
+   ["-V" "--version" "Show version"]])
 
 (defn- usage
   "Returns usage string."
@@ -85,19 +91,48 @@
     (doseq [e errors] (println e)))
   (System/exit 1))
 
+;; musl? is evaluated at AOT compile time (macro expansion time).
+;; For musl static builds, set CEEKER_STATIC=true CEEKER_MUSL=true
+;; when running `clojure -T:build uber` to produce a musl-compatible binary.
+;; This follows the same pattern used by clj-kondo and jet.
+(def ^:private musl?
+  (and (= "true" (System/getenv "CEEKER_STATIC"))
+       (= "true" (System/getenv "CEEKER_MUSL"))))
+
+(defmacro ^:private run [expr]
+  (if musl?
+    `(let [v# (volatile! nil)
+           ex# (volatile! nil)
+           f# (fn []
+                (try
+                  (vreset! v# ~expr)
+                  (catch Throwable t#
+                    (vreset! ex# t#))))]
+       (doto (Thread. nil f# "ceeker-main")
+         (.start)
+         (.join))
+       (when-let [t# @ex#]
+         (throw t#))
+       @v#)
+    `(do ~expr)))
+
 (defn -main
   "Main entry point."
   [& args]
-  (let [{:keys [options arguments summary errors]}
-        (cli/parse-opts args cli-options :in-order true)]
-    (cond
-      errors
-      (print-errors! errors)
-      (:help options)
-      (do (println (usage summary))
-          (System/exit 0))
-      (= "hook" (first arguments))
-      (handle-hook-command (rest arguments))
-      :else
-      (do (tui/start-tui!)
-          (System/exit 0)))))
+  (run
+   (let [{:keys [options arguments summary errors]}
+         (cli/parse-opts args cli-options :in-order true)]
+     (cond
+       errors
+       (print-errors! errors)
+       (:version options)
+       (do (println (str "ceeker " version))
+           (System/exit 0))
+       (:help options)
+       (do (println (usage summary))
+           (System/exit 0))
+       (= "hook" (first arguments))
+       (handle-hook-command (rest arguments))
+       :else
+       (do (tui/start-tui!)
+           (System/exit 0))))))
