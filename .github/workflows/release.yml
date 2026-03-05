@@ -95,7 +95,7 @@ jobs:
             release/*.tar.gz
             release/checksums.txt
 
-  update-homebrew-tap:
+  notify-homebrew-tap:
     needs: release
     runs-on: ubuntu-latest
     permissions:
@@ -111,14 +111,11 @@ jobs:
         run: |
           mkdir -p tarballs
           for platform in linux-amd64 linux-arm64 darwin-arm64; do
-            echo "Downloading ceeker-${platform}.tar.gz ..."
             gh release download "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" \
               --pattern "ceeker-${platform}.tar.gz" \
               --dir tarballs
           done
-          echo "All tarballs downloaded."
-          ls -la tarballs/
 
       - name: Compute SHA256 checksums
         id: sha
@@ -132,100 +129,33 @@ jobs:
             sha=$(sha256sum "$file" | awk '{print $1}')
             key="sha_$(echo "$platform" | tr '-' '_')"
             echo "${key}=${sha}" >> "$GITHUB_OUTPUT"
-            echo "  ${platform}: ${sha}"
           done
 
-      - name: Update homebrew-tap formula
+      - name: Dispatch to homebrew-tap
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          SHA_DARWIN_ARM64: ${{ steps.sha.outputs.sha_darwin_arm64 }}
+          SHA_LINUX_AMD64: ${{ steps.sha.outputs.sha_linux_amd64 }}
+          SHA_LINUX_ARM64: ${{ steps.sha.outputs.sha_linux_arm64 }}
+          SENDER: ${{ github.repository }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="${GITHUB_REF_NAME}"
-          SHA_DARWIN_ARM64="${{ steps.sha.outputs.sha_darwin_arm64 }}"
-          SHA_LINUX_AMD64="${{ steps.sha.outputs.sha_linux_amd64 }}"
-          SHA_LINUX_ARM64="${{ steps.sha.outputs.sha_linux_arm64 }}"
-
-          if [ -z "$SHA_DARWIN_ARM64" ] || [ -z "$SHA_LINUX_AMD64" ] || [ -z "$SHA_LINUX_ARM64" ]; then
-            echo "::error::One or more SHA256 checksums are empty"
-            exit 1
-          fi
-
-          gh repo clone boxp/homebrew-tap homebrew-tap -- --depth 1
-          cd homebrew-tap
-
-          cat > Formula/ceeker.rb << EOF
-          # typed: false
-          # frozen_string_literal: true
-
-          class Ceeker < Formula
-            desc "AI Coding Agent session and progress monitoring TUI"
-            homepage "https://github.com/boxp/ceeker"
-            version "${VERSION}"
-            license "MIT"
-
-            on_macos do
-              on_arm do
-                url "https://github.com/boxp/ceeker/releases/download/${TAG}/ceeker-darwin-arm64.tar.gz"
-                sha256 "${SHA_DARWIN_ARM64}"
-
-                def install
-                  bin.install "ceeker-darwin-arm64" => "ceeker"
-                end
-              end
-            end
-
-            on_linux do
-              on_intel do
-                url "https://github.com/boxp/ceeker/releases/download/${TAG}/ceeker-linux-amd64.tar.gz"
-                sha256 "${SHA_LINUX_AMD64}"
-
-                def install
-                  bin.install "ceeker-linux-amd64" => "ceeker"
-                end
-              end
-              on_arm do
-                url "https://github.com/boxp/ceeker/releases/download/${TAG}/ceeker-linux-arm64.tar.gz"
-                sha256 "${SHA_LINUX_ARM64}"
-
-                def install
-                  bin.install "ceeker-linux-arm64" => "ceeker"
-                end
-              end
-            end
-
-            test do
-              assert_match version.to_s, shell_output("#{bin}/ceeker --version")
-            end
-          end
-          EOF
-
-          gh auth setup-git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          BRANCH="update-ceeker-${VERSION}"
-          if git ls-remote --exit-code origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
-            git fetch origin "$BRANCH"
-            git checkout "$BRANCH"
-          else
-            git checkout -b "$BRANCH"
-          fi
-          git add Formula/ceeker.rb
-          git commit -m "ceeker ${VERSION}" --allow-empty
-          git push origin "$BRANCH" --force
-
-          EXISTING_PR=$(gh pr list --repo boxp/homebrew-tap --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || true)
-          if [ -n "$EXISTING_PR" ]; then
-            echo "PR #${EXISTING_PR} already exists for branch ${BRANCH}, skipping creation."
-          else
-            gh pr create \
-              --repo boxp/homebrew-tap \
-              --title "ceeker ${VERSION}" \
-              --body "Automated formula update for ceeker ${TAG}.
-
-          - Version: ${VERSION}
-          - Release: https://github.com/boxp/ceeker/releases/tag/${TAG}
-          - darwin-arm64 SHA256: \`${SHA_DARWIN_ARM64}\`
-          - linux-amd64 SHA256: \`${SHA_LINUX_AMD64}\`
-          - linux-arm64 SHA256: \`${SHA_LINUX_ARM64}\`"
-          fi
+          jq -n \
+            --arg version "$VERSION" \
+            --arg tag "$TAG" \
+            --arg sha_darwin_arm64 "$SHA_DARWIN_ARM64" \
+            --arg sha_linux_amd64 "$SHA_LINUX_AMD64" \
+            --arg sha_linux_arm64 "$SHA_LINUX_ARM64" \
+            --arg sender "$SENDER" \
+            '{
+              event_type: "update-ceeker-formula",
+              client_payload: {
+                version: $version,
+                tag: $tag,
+                sha_darwin_arm64: $sha_darwin_arm64,
+                sha_linux_amd64: $sha_linux_amd64,
+                sha_linux_arm64: $sha_linux_arm64,
+                sender: $sender
+              }
+            }' | gh api repos/boxp/homebrew-tap/dispatches --method POST --input -
