@@ -1,7 +1,9 @@
 (ns ceeker.tui.view-test
   (:require [ceeker.tui.view :as view]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing]])
+  (:import [java.time Instant ZoneId]
+           [java.time.format DateTimeFormatter]))
 
 ;; -- char-display-width tests --
 
@@ -450,3 +452,40 @@
           "All lines should contain the worktree name")
       (is (apply = positions)
           "WORKTREE column should start at same position for all statuses"))))
+
+;; -- format-time timezone tests --
+
+(deftest test-format-time-converts-to-local-tz
+  (testing "UTC timestamp is converted to local timezone"
+    (let [utc-ts "2025-06-15T03:30:45.000Z"
+          result (#'view/format-time utc-ts)
+          ;; Compute expected value using the same logic
+          expected (-> (Instant/parse utc-ts)
+                       (.atZone (ZoneId/systemDefault))
+                       (.format (DateTimeFormatter/ofPattern
+                                 "HH:mm:ss")))]
+      (is (= expected result))
+      (is (re-matches #"\d{2}:\d{2}:\d{2}" result)
+          "Result should be HH:mm:ss format"))))
+
+(deftest test-format-time-nil-and-short
+  (testing "nil returns empty string"
+    (is (= "" (#'view/format-time nil))))
+  (testing "short string returns as-is"
+    (is (= "12:34" (#'view/format-time "12:34"))))
+  (testing "empty string returns empty"
+    (is (= "" (#'view/format-time "")))))
+
+(deftest test-format-time-invalid-timestamp-fallback
+  (testing "Invalid but long enough string falls back gracefully"
+    (let [result (#'view/format-time "not-a-real-timestamp!")]
+      (is (= "not-a-real-timestamp!" result)))))
+
+(deftest test-format-time-utc-zone
+  (testing "In UTC zone, output matches UTC time"
+    (let [utc-ts "2025-01-01T12:34:56.000Z"
+          expected (-> (Instant/parse utc-ts)
+                       (.atZone (ZoneId/systemDefault))
+                       (.format (DateTimeFormatter/ofPattern
+                                 "HH:mm:ss")))]
+      (is (= expected (#'view/format-time utc-ts))))))

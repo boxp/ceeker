@@ -150,8 +150,6 @@
             s3 (get-in state [:sessions "s3"])]
         (is (= :running (:agent-status s1)))
         (is (= :closed (:agent-status s2)))
-        (is (= "pane closed"
-               (:last-message s2)))
         (is (= :completed (:agent-status s3))))
       (finally
         (cleanup-dir dir)))))
@@ -185,7 +183,8 @@
         (let [s1 (get-in (store/read-sessions dir)
                          [:sessions "s1"])]
           (is (= :closed (:agent-status s1)))
-          (is (= "pane closed" (:last-message s1))))
+          (is (= "idle" (:last-message s1))
+              "last-message preserved during state transition"))
         (finally
           (cleanup-dir dir))))))
 
@@ -229,7 +228,8 @@
             old (get-in state [:sessions "old-session"])
             new (get-in state [:sessions "new-session"])]
         (is (= :closed (:agent-status old)))
-        (is (= "superseded" (:last-message old)))
+        (is (= "working" (:last-message old))
+            "last-message preserved when superseded")
         (is (= :running (:agent-status new))))
       (finally
         (cleanup-dir dir)))))
@@ -392,7 +392,8 @@
       (let [s (get-in (store/read-sessions dir)
                       [:sessions "old"])]
         (is (= :closed (:agent-status s)))
-        (is (= "superseded" (:last-message s))))
+        (is (= "working" (:last-message s))
+            "last-message preserved when superseded"))
       ;; delayed hook tries to set old back to running
       (store/update-session!
        dir "old"
@@ -402,7 +403,8 @@
       (let [s (get-in (store/read-sessions dir)
                       [:sessions "old"])]
         (is (= :closed (:agent-status s)))
-        (is (= "superseded" (:last-message s))))
+        (is (= "working" (:last-message s))
+            "delayed running update blocked on superseded session"))
       ;; non-running update merges but flag is kept
       (store/update-session!
        dir "old"
@@ -439,13 +441,13 @@
           :last-message "working"})
         (let [applied (store/update-session-if-active!
                        dir "s1"
-                       {:agent-status :idle
-                        :last-message "idle"})]
+                       {:agent-status :idle})]
           (is (true? applied))
           (let [s (get-in (store/read-sessions dir)
                           [:sessions "s1"])]
             (is (= :idle (:agent-status s)))
-            (is (= "idle" (:last-message s)))
+            (is (= "working" (:last-message s))
+                "last-message preserved during capture-based update")
             (is (= :claude-code (:agent-type s)))))
         (finally
           (cleanup-dir dir))))))
@@ -462,8 +464,7 @@
           :last-message "idle"})
         (let [applied (store/update-session-if-active!
                        dir "s1"
-                       {:agent-status :running
-                        :last-message "running"})]
+                       {:agent-status :running})]
           (is (true? applied))
           (let [s (get-in (store/read-sessions dir)
                           [:sessions "s1"])]
@@ -483,8 +484,7 @@
           :last-message "waiting"})
         (let [applied (store/update-session-if-active!
                        dir "s1"
-                       {:agent-status :running
-                        :last-message "running"})]
+                       {:agent-status :running})]
           (is (true? applied))
           (let [s (get-in (store/read-sessions dir)
                           [:sessions "s1"])]
@@ -504,8 +504,7 @@
           :last-message "done"})
         (let [applied (store/update-session-if-active!
                        dir "s1"
-                       {:agent-status :idle
-                        :last-message "idle"})]
+                       {:agent-status :idle})]
           (is (false? applied))
           (let [s (get-in (store/read-sessions dir)
                           [:sessions "s1"])]
@@ -547,7 +546,6 @@
         (let [applied (store/reactivate-closed-session!
                        dir "s1"
                        {:agent-status :running
-                        :last-message "reactivated: running"
                         :last-updated
                         (.toString
                          (java.time.Instant/now))})]
@@ -555,8 +553,8 @@
           (let [s (get-in (store/read-sessions dir)
                           [:sessions "s1"])]
             (is (= :running (:agent-status s)))
-            (is (= "reactivated: running"
-                   (:last-message s)))))
+            (is (= "working" (:last-message s))
+                "last-message preserved after reactivation")))
         (finally
           (cleanup-dir dir))))))
 
@@ -585,8 +583,7 @@
         ;; Reactivate attempt should fail
         (let [applied (store/reactivate-closed-session!
                        dir "old"
-                       {:agent-status :running
-                        :last-message "reactivated"})]
+                       {:agent-status :running})]
           (is (false? applied))
           (let [s (get-in (store/read-sessions dir)
                           [:sessions "old"])]
@@ -606,8 +603,7 @@
           :last-message "working"})
         (let [applied (store/reactivate-closed-session!
                        dir "s1"
-                       {:agent-status :running
-                        :last-message "reactivated"})]
+                       {:agent-status :running})]
           (is (false? applied))
           (let [s (get-in (store/read-sessions dir)
                           [:sessions "s1"])]
@@ -724,5 +720,122 @@
         (let [state (store/read-sessions dir)]
           (is (some? (get-in state [:sessions "s1"]))
               "Closed session with live pane should not be purged"))
+        (finally
+          (cleanup-dir dir))))))
+
+;; --- Message preservation regression tests ---
+
+(deftest test-message-preserved-on-pane-close
+  (testing "last-message is not overwritten when session is closed as stale"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/gone"
+          :last-message "using: Bash"})
+        (store/close-stale-sessions! dir #{})
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "s1"])]
+          (is (= :closed (:agent-status s)))
+          (is (= "using: Bash" (:last-message s))
+              "Agent message must be preserved when pane closes"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-message-preserved-on-supersede
+  (testing "last-message is not overwritten when session is superseded"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "old"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "used: Edit"})
+        (store/update-session!
+         dir "new"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "session started"})
+        (let [old (get-in (store/read-sessions dir)
+                          [:sessions "old"])]
+          (is (= :closed (:agent-status old)))
+          (is (= "used: Edit" (:last-message old))
+              "Agent message must be preserved when superseded"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-message-preserved-on-close-by-pred
+  (testing "last-message preserved when closed via close-sessions-by-pred!"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "subagent spawned"})
+        (store/close-sessions-by-pred!
+         dir (fn [_sid _session] true))
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "s1"])]
+          (is (= :closed (:agent-status s)))
+          (is (= "subagent spawned" (:last-message s))
+              "Agent message must be preserved when closed by predicate"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-message-preserved-on-capture-update
+  (testing "last-message preserved when status is updated via capture"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :last-message "used: Bash"})
+        (store/update-session-if-active!
+         dir "s1"
+         {:agent-status :idle})
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "s1"])]
+          (is (= :idle (:agent-status s)))
+          (is (= "used: Bash" (:last-message s))
+              "Agent message must be preserved during capture-based status update"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-message-preserved-on-reactivation
+  (testing "last-message preserved when closed session is reactivated"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "task completed"})
+        ;; Close it
+        (store/close-stale-sessions! dir #{})
+        (is (= :closed (get-in (store/read-sessions dir)
+                               [:sessions "s1" :agent-status])))
+        ;; Reactivate without message
+        (store/reactivate-closed-session!
+         dir "s1"
+         {:agent-status :running
+          :last-updated (.toString (java.time.Instant/now))})
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "s1"])]
+          (is (= :running (:agent-status s)))
+          (is (= "task completed" (:last-message s))
+              "Agent message must be preserved after reactivation"))
         (finally
           (cleanup-dir dir))))))

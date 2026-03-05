@@ -133,7 +133,6 @@
   [sessions session-id session-data now]
   (if-let [key (supersede-key session-data)]
     (let [supersede-data {:agent-status :closed
-                          :last-message "superseded"
                           :superseded true
                           :last-updated now}]
       (reduce-kv
@@ -300,7 +299,6 @@
   "Returns updated sessions map with stale ones closed."
   [sessions pane-cwds now]
   (let [close-data {:agent-status :closed
-                    :last-message "pane closed"
                     :last-updated now}]
     (update-vals sessions
                  (fn [session]
@@ -394,7 +392,6 @@
    for which stale-pred returns true."
   [sessions stale-pred now]
   (let [close-data {:agent-status :closed
-                    :last-message "pane closed"
                     :last-updated now}]
     (reduce-kv
      (fn [m sid session]

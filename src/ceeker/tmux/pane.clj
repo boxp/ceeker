@@ -255,10 +255,6 @@
                  (not= (:status detected)
                        (:agent-status session)))
         {:agent-status (:status detected)
-         :last-message (if (:waiting-reason detected)
-                         (str "waiting: "
-                              (:waiting-reason detected))
-                         (name (:status detected)))
          :last-updated (.toString
                         (java.time.Instant/now))}))))
 
@@ -283,11 +279,6 @@
       (when (contains? reactivatable-statuses
                        (:status detected))
         {:agent-status (:status detected)
-         :last-message (if (:waiting-reason detected)
-                         (str "waiting: "
-                              (:waiting-reason detected))
-                         (str "reactivated: "
-                              (name (:status detected))))
          :last-updated (.toString
                         (java.time.Instant/now))}))))
 
