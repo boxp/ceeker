@@ -1,34 +1,36 @@
 # ceeker
 
-AI Coding Agent セッション・進捗モニタリングTUI。
+> [日本語版 (Japanese)](./README.ja.md)
 
-複数のAIコーディングエージェント（Claude Code / Codex）が並行動作する環境で、各セッションの状態を一覧表示し、tmuxペインへのジャンプを可能にする。
+A TUI for monitoring AI coding agent sessions and progress.
 
-## 前提条件
+In environments where multiple AI coding agents (Claude Code / Codex) run in parallel, ceeker provides a unified view of all sessions with the ability to jump to individual tmux panes.
+
+## Prerequisites
 
 - tmux
 
-## インストール
+## Installation
 
-### Homebrew（macOS / Linux）
+### Homebrew (macOS / Linux)
 
 ```bash
 brew tap boxp/tap
 brew install ceeker
 ```
 
-アップデート:
+To update:
 
 ```bash
 brew upgrade ceeker
 ```
 
-### tarball から直接インストール
+### Install from tarball
 
-[Releases](https://github.com/boxp/ceeker/releases) からプラットフォームに合った tarball をダウンロード:
+Download the tarball for your platform from [Releases](https://github.com/boxp/ceeker/releases):
 
 ```bash
-# 例: macOS ARM64
+# Example: macOS ARM64
 curl -L -o ceeker.tar.gz https://github.com/boxp/ceeker/releases/latest/download/ceeker-darwin-arm64.tar.gz
 tar xzf ceeker.tar.gz
 chmod +x ceeker-darwin-arm64
@@ -36,60 +38,60 @@ sudo mv ceeker-darwin-arm64 /usr/local/bin/ceeker
 ```
 
 ```bash
-# 例: Linux amd64
+# Example: Linux amd64
 curl -L -o ceeker.tar.gz https://github.com/boxp/ceeker/releases/latest/download/ceeker-linux-amd64.tar.gz
 tar xzf ceeker.tar.gz
 chmod +x ceeker-linux-amd64
 sudo mv ceeker-linux-amd64 /usr/local/bin/ceeker
 ```
 
-## 使い方
+## Usage
 
-### TUI起動
+### TUI
 
 ```bash
 ceeker
 ```
 
-セッション一覧が表示されます。
+Displays a list of all active sessions.
 
-**機能:**
+**Features:**
 
-- **自動反映**: `sessions.edn` のファイル変更を inotify（Linux）/ WatchService で検知し、TUIを自動更新
-- **セッション絞り込み**: エージェント種別・ステータス・テキスト検索で表示を絞り込み
+- **Auto-refresh**: Detects file changes to `sessions.edn` via inotify (Linux) / WatchService and automatically updates the TUI
+- **Session filtering**: Filter the display by agent type, status, or text search
 
-**キーバインド:**
+**Key bindings:**
 
-| キー | 動作 |
-|------|------|
-| `j` / `↓` | 下へ移動 |
-| `k` / `↑` | 上へ移動 |
-| `Enter` | 選択セッションのtmuxペインへジャンプ |
-| `r` | 手動リフレッシュ |
-| `v` | 表示切替 (Auto→Table→Card) |
-| `a` | エージェント種別フィルタ切替（全て → Claude → Codex → 全て） |
-| `s` | ステータスフィルタ切替（全て → running → completed → error → waiting → idle → 全て） |
-| `/` | テキスト検索（session-id / cwd 部分一致） |
-| `c` | フィルタ全クリア |
-| `q` | 終了 |
+| Key | Action |
+|-----|--------|
+| `j` / `↓` | Move down |
+| `k` / `↑` | Move up |
+| `Enter` | Jump to the selected session's tmux pane |
+| `r` | Manual refresh |
+| `v` | Toggle view mode (Auto → Table → Card) |
+| `a` | Toggle agent type filter (All → Claude → Codex → All) |
+| `s` | Toggle status filter (All → running → completed → error → waiting → idle → All) |
+| `/` | Text search (partial match on session-id / cwd) |
+| `c` | Clear all filters |
+| `q` | Quit |
 
 ### Hook CLI
 
 ```bash
-# Claude Code hookイベントを処理（stdin で JSON payload を受け取る）
+# Process Claude Code hook events (receives JSON payload via stdin)
 ceeker hook claude Notification <<< '{"session_id":"abc","cwd":"/tmp","hook_event_name":"Notification","title":"Working..."}'
 
-# Codex notify hookイベントを処理（Codex が JSON を最後の引数として渡す）
+# Process Codex notify hook events (Codex passes JSON as the last argument)
 ceeker hook codex '{"type":"agent-turn-complete","thread-id":"xyz","cwd":"/tmp","last-assistant-message":"Done."}'
-# レガシー形式も引き続きサポート
+# Legacy format is also supported
 ceeker hook codex notification '{"session_id":"xyz","message":"Testing..."}'
 ```
 
-## Hook設定
+## Hook Configuration
 
 ### Claude Code
 
-`.claude/settings.json` に以下を追加（[公式仕様](https://docs.anthropic.com/en/docs/claude-code/hooks)準拠の3レベルネスト形式）:
+Add the following to `.claude/settings.json` (using the 3-level nesting format per the [official spec](https://docs.anthropic.com/en/docs/claude-code/hooks)):
 
 ```json
 {
@@ -113,68 +115,68 @@ ceeker hook codex notification '{"session_id":"xyz","message":"Testing..."}'
 }
 ```
 
-Claude Code は hook コマンドの stdin に JSON payload を渡します。payload には `session_id`, `cwd`, `hook_event_name` 等の共通フィールドが含まれます（[Hooks reference](https://docs.anthropic.com/en/docs/claude-code/hooks) 参照）。
+Claude Code passes a JSON payload to hook commands via stdin. The payload contains common fields such as `session_id`, `cwd`, and `hook_event_name` (see the [Hooks reference](https://docs.anthropic.com/en/docs/claude-code/hooks)).
 
 ### Codex
 
-`~/.codex/config.toml` に以下を追加:
+Add the following to `~/.codex/config.toml`:
 
 ```toml
 notify = ["ceeker", "hook", "codex"]
 ```
 
-Codex は `notify` コマンドの最後の引数として JSON ペイロードを追加します（stdin ではなく argv 経由）。
+Codex appends the JSON payload as the last argument of the `notify` command (via argv, not stdin).
 
-## セッション自動整理
+## Automatic Session Cleanup
 
-tmuxペインが終了すると、対応するセッションは自動的に `Closed` 状態に遷移します。
+When a tmux pane is closed, the corresponding session automatically transitions to the `Closed` state.
 
-**チェックタイミング:**
+**Check timing:**
 
-- TUI起動時に全セッションを一括チェック
-- TUI表示中は約10秒ごとに定期チェック
-- hookイベント受信時にもチェック実行
+- All sessions are checked at TUI startup
+- Periodic checks run approximately every 10 seconds while the TUI is displayed
+- Checks also run when a hook event is received
 
-**仕組み:**
+**How it works:**
 
-`tmux list-panes -a` を1回実行して全ペインのcwdとPIDを取得し、`running` 状態のセッションと照合します。以下の条件でセッションは `closed` に遷移します:
+A single `tmux list-panes -a` call retrieves the cwd and PID of all panes, which are then matched against sessions in the `running` state. A session transitions to `closed` under the following conditions:
 
-1. **ペイン不在**: セッションのcwdに一致するtmuxペインが存在しない
-2. **プロセスツリー探索**: cwdが一致するペインが存在しても、そのペインのプロセスツリー内に対象エージェント（claude/codex）のプロセスが見つからない場合
+1. **Pane not found**: No tmux pane exists matching the session's cwd
+2. **Process tree search**: Even if a pane with a matching cwd exists, the target agent (claude/codex) process is not found in the pane's process tree
 
-tmuxが利用できない場合はチェックをスキップします。
+Checks are skipped when tmux is not available.
 
-### セッション重複防止（Supersede-per-Key）
+### Session Deduplication (Supersede-per-Key)
 
-同一tmuxペインでエージェントをclose/resumeしたとき、旧セッションが `Running` のまま残って増殖する問題を防止します。
+Prevents stale sessions from accumulating when an agent is closed and resumed within the same tmux pane.
 
-**動作:**
+**Behavior:**
 
-- hookイベント受信時、`$TMUX_PANE` 環境変数からペインIDを取得
-- 新セッション登録時、同一キー `(pane-id, agent-type, cwd)` を持つ既存の `running` セッションを自動的に `closed`（superseded）に遷移
-- `$TMUX_PANE` が利用できない場合（tmux外など）はsupersede判定をスキップ
+- On hook event receipt, the pane ID is obtained from the `$TMUX_PANE` environment variable
+- When a new session is registered, any existing `running` session with the same key `(pane-id, agent-type, cwd)` is automatically transitioned to `closed` (superseded)
+- If `$TMUX_PANE` is not available (e.g., outside tmux), supersede detection is skipped
 
-**例:**
+**Example:**
 
-1. ペイン `%42` で Claude Code を起動 → session-A が `running` に
-2. Claude Code を close → session-A はそのまま `running`（Stop hookが届かなかった場合）
-3. 同じペイン `%42` で resume → session-B 登録時に session-A が自動で `closed` に
+1. Start Claude Code in pane `%42` → session-A becomes `running`
+2. Close Claude Code → session-A remains `running` (if the Stop hook was not delivered)
+3. Resume in the same pane `%42` → session-A is automatically set to `closed` when session-B is registered
 
-## 縦長ペイン時の表示仕様
+## Display Modes for Narrow Panes
 
-ターミナル幅が80カラム未満の場合、自動的にコンパクトカード表示に切り替わります。
+When the terminal width is less than 80 columns, the display automatically switches to a compact card layout.
 
-### 表示モード
+### View Modes
 
-| モード | 説明 |
-|--------|------|
-| Auto | 幅80未満でカード、80以上でテーブル（デフォルト） |
-| Table | 常にテーブル表示 |
-| Card | 常にカード表示 |
+| Mode | Description |
+|------|-------------|
+| Auto | Card below 80 columns, table at 80+ (default) |
+| Table | Always show table view |
+| Card | Always show card view |
 
-`v` キーで Auto → Table → Card の順に切り替え可能です。
+Press `v` to cycle through Auto → Table → Card.
 
-### カード表示例
+### Card View Example
 
 ```
   ceeker — 2 session(s)
@@ -191,7 +193,7 @@ tmuxが利用できない場合はチェックをスキップします。
   [j/k] Navigate  [Enter] Jump to tmux  [r] Refresh  [v] View:Auto  [q] Quit
 ```
 
-### テーブル表示例（通常幅）
+### Table View Example (Normal Width)
 
 ```
   ceeker — 2 session(s)
@@ -204,39 +206,39 @@ tmuxが利用できない場合はチェックをスキップします。
   [j/k] Navigate  [Enter] Jump to tmux  [r] Refresh  [v] View:Auto  [q] Quit
 ```
 
-## 開発
+## Development
 
 ```bash
-# テスト
+# Run tests
 make test
 
-# lint
+# Lint
 make lint
 
-# フォーマット
+# Format
 make format
 ```
 
 ## CI
 
-GitHub Actions で以下のジョブが PR / main push 時に実行されます:
+GitHub Actions runs the following jobs on PRs and pushes to main:
 
 - **lint**: clj-kondo lint + cljfmt format-check
-- **test**: Clojure ユニットテスト
-- **native-e2e**: GraalVM native-image ビルド + E2E テスト
+- **test**: Clojure unit tests
+- **native-e2e**: GraalVM native-image build + E2E tests
 
 ### native-e2e
 
-native-image でビルドしたバイナリに対して E2E テストを実行し、JVM では再現しない native-image 固有の不具合を検出します。
+Runs E2E tests against a binary built with native-image to catch native-image-specific issues that don't reproduce on the JVM.
 
-テスト内容:
-- `--help` 出力確認
-- hook コマンド (Claude / Codex) のセッション記録
-- TUI 起動・終了 (`q` キー)
-- TUI 検索モード (`/` → `Esc` → `q`)
+Test cases:
+- `--help` output verification
+- Hook commands (Claude / Codex) session recording
+- TUI startup and exit (`q` key)
+- TUI search mode (`/` → `Esc` → `q`)
 
-TUI テストは tmux を利用してターミナルを模擬します。
+TUI tests use tmux to simulate a terminal.
 
-## ライセンス
+## License
 
 MIT
