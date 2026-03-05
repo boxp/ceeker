@@ -208,13 +208,18 @@ jobs:
           git commit -m "ceeker ${VERSION}" --allow-empty
           git push origin "$BRANCH" --force-with-lease
 
-          gh pr create \
-            --repo boxp/homebrew-tap \
-            --title "ceeker ${VERSION}" \
-            --body "Automated formula update for ceeker ${TAG}.
+          EXISTING_PR=$(gh pr list --repo boxp/homebrew-tap --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #${EXISTING_PR} already exists for branch ${BRANCH}, skipping creation."
+          else
+            gh pr create \
+              --repo boxp/homebrew-tap \
+              --title "ceeker ${VERSION}" \
+              --body "Automated formula update for ceeker ${TAG}.
 
           - Version: ${VERSION}
           - Release: https://github.com/boxp/ceeker/releases/tag/${TAG}
           - darwin-arm64 SHA256: \`${SHA_DARWIN_ARM64}\`
           - linux-amd64 SHA256: \`${SHA_LINUX_AMD64}\`
           - linux-arm64 SHA256: \`${SHA_LINUX_ARM64}\`"
+          fi
