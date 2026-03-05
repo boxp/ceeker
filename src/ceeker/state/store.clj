@@ -238,6 +238,33 @@
                true)
              false)))))))
 
+(defn reactivate-closed-session!
+  "Atomically updates a session only if it is :closed and
+   not superseded. Used to reactivate sessions where the
+   agent has reappeared in the pane.
+   Returns true if the update was applied."
+  ([session-id session-data]
+   (reactivate-closed-session!
+    (state-dir) session-id session-data))
+  ([dir session-id session-data]
+   (ensure-state-dir! dir)
+   (let [path (state-file-path dir)]
+     (with-file-lock dir
+       (fn []
+         (let [state (read-state-file path)
+               existing (get-in state
+                                [:sessions session-id])]
+           (if (and (= :closed (:agent-status existing))
+                    (not (superseded? existing)))
+             (let [updated (merge existing session-data)]
+               (write-state-file!
+                path
+                (assoc-in state
+                          [:sessions session-id]
+                          updated))
+               true)
+             false)))))))
+
 (defn remove-session!
   "Removes a session from the state store."
   ([session-id]
@@ -303,6 +330,65 @@
            (write-state-file!
             path
             (assoc state :sessions updated))))))))
+
+(def ^:const closed-ttl-ms
+  "Time-to-live (ms) for closed sessions before purging.
+   Default: 5 minutes."
+  300000)
+
+(defn- expired-closed?
+  "Returns true if session is closed, not superseded,
+   and its last-updated timestamp is older than ttl-ms."
+  [session now-ms ttl-ms]
+  (and (= :closed (:agent-status session))
+       (if-let [ts (:last-updated session)]
+         (try
+           (let [updated-ms (.toEpochMilli
+                             (java.time.Instant/parse ts))]
+             (> (- now-ms updated-ms) ttl-ms))
+           (catch Exception _ true))
+         true)))
+
+(defn- purgeable?
+  "Returns true if session should be purged: expired closed
+   and pane-id not in live-pane-ids."
+  [session now-ms ttl-ms live-pane-ids]
+  (and (expired-closed? session now-ms ttl-ms)
+       (not (contains? live-pane-ids
+                       (:pane-id session)))))
+
+(defn- purge-sessions
+  "Removes purgeable sessions from the sessions map."
+  [sessions now-ms ttl-ms live-pane-ids]
+  (into {}
+        (remove (fn [[_sid session]]
+                  (purgeable? session now-ms
+                              ttl-ms live-pane-ids))
+                sessions)))
+
+(defn purge-expired-closed-sessions!
+  "Removes closed sessions that have exceeded the TTL
+   and whose pane-id is not in the live pane-ids set.
+   Atomic under file lock."
+  ([live-pane-ids]
+   (purge-expired-closed-sessions!
+    (state-dir) live-pane-ids))
+  ([dir live-pane-ids]
+   (purge-expired-closed-sessions!
+    dir live-pane-ids closed-ttl-ms))
+  ([dir live-pane-ids ttl-ms]
+   (ensure-state-dir! dir)
+   (let [path (state-file-path dir)
+         now-ms (.toEpochMilli (java.time.Instant/now))]
+     (with-file-lock dir
+       (fn []
+         (let [state (read-state-file path)
+               remaining (purge-sessions
+                          (:sessions state)
+                          now-ms ttl-ms live-pane-ids)]
+           (write-state-file!
+            path
+            (assoc state :sessions remaining))))))))
 
 (defn- apply-stale-pred
   "Returns updated sessions map, closing active sessions

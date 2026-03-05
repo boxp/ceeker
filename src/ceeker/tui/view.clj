@@ -66,11 +66,22 @@
             (<= 0x3000 cp 0x303F))
       2 1)))
 
-(defn- str-display-width
-  "Returns total terminal display width of a string."
+(defn- strip-ansi
+  "Removes ANSI escape sequences from a string."
   [s]
   (if (seq s)
-    (reduce + 0 (map char-display-width s))
+    (str/replace s #"\033\[[0-9;]*m" "")
+    ""))
+
+(defn- str-display-width
+  "Returns total terminal display width of a string.
+   Strips ANSI escape sequences before measuring."
+  [s]
+  (if (seq s)
+    (let [plain (strip-ansi s)]
+      (if (seq plain)
+        (reduce + 0 (map char-display-width plain))
+        0))
     0))
 
 (defn- substr-by-width
@@ -148,26 +159,33 @@
       (str s (apply str (repeat deficit \space)))
       s)))
 
+(defn- format-session-columns
+  "Builds column values for a table row as a single string."
+  [session]
+  (let [sid (pad-to-width (truncate (:session-id session) 12)
+                          12)
+        agent (pad-to-width
+               (agent-badge (:agent-type session)) 9)
+        status (pad-to-width
+                (status-badge (:agent-status session)) 11)
+        wt (pad-to-width
+            (or (cwd-short-name (:cwd session)) "") 12)
+        msg (-> (:last-message session)
+                normalize-message
+                (truncate-by-width 40)
+                (pad-to-width 40))]
+    (str sid " " agent " " status " "
+         wt " " msg " "
+         (format-time (:last-updated session)))))
+
 (defn- format-session-line
   "Formats a single session line for display."
   [session selected? _index]
   (let [pfx (if selected?
               (str ansi-reverse " > " ansi-reset ansi-reverse)
               "   ")
-        sfx (if selected? ansi-reset "")
-        msg (-> (:last-message session)
-                normalize-message
-                (truncate-by-width 40)
-                (pad-to-width 40))]
-    (str pfx
-         (format " %-12s %s %s %-12s %s %s"
-                 (truncate (:session-id session) 12)
-                 (agent-badge (:agent-type session))
-                 (status-badge (:agent-status session))
-                 (or (cwd-short-name (:cwd session)) "")
-                 msg
-                 (format-time (:last-updated session)))
-         sfx)))
+        sfx (if selected? ansi-reset "")]
+    (str pfx " " (format-session-columns session) sfx)))
 
 (defn- card-line1 [session selected? sel-start sel-end]
   (str "  ┌ " sel-start
@@ -245,9 +263,13 @@
 
 (defn- column-headers []
   (str ansi-dim
-       (format "   %-12s %-9s %-11s %-12s %-40s %s"
-               "SESSION" "AGENT" "STATUS"
-               "WORKTREE" "MESSAGE" "UPDATED")
+       "   "
+       (pad-to-width "SESSION" 12) " "
+       (pad-to-width "AGENT" 9) " "
+       (pad-to-width "STATUS" 11) " "
+       (pad-to-width "WORKTREE" 12) " "
+       (pad-to-width "MESSAGE" 40) " "
+       "UPDATED"
        ansi-reset))
 
 (defn- footer-line [display-mode search-mode? search-buf]
