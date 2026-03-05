@@ -251,10 +251,17 @@
          :last-updated (.toString
                         (java.time.Instant/now))}))))
 
+(def ^:private reactivatable-statuses
+  "Statuses that justify reopening a closed session.
+   :idle alone is excluded because detect-agent-state can
+   classify a plain shell prompt as :idle even when no agent
+   process is present, causing closed->idle flapping."
+  #{:running :waiting})
+
 (defn- capture-state-for-closed-session
   "Detects state for a closed (non-superseded) session.
-   Returns updated session data if an agent is detected
-   running in the pane, enabling reactivation."
+   Returns updated session data only when the agent is
+   actively running or waiting, not merely idle."
   [session]
   (when (and (= :closed (:agent-status session))
              (not (:superseded session))
@@ -262,7 +269,8 @@
     (when-let [detected (capture/detect-agent-state
                          (:pane-id session)
                          (:agent-type session))]
-      (when (:status detected)
+      (when (contains? reactivatable-statuses
+                       (:status detected))
         {:agent-status (:status detected)
          :last-message (if (:waiting-reason detected)
                          (str "waiting: "

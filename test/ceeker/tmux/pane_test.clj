@@ -1,7 +1,9 @@
 (ns ceeker.tmux.pane-test
   (:require [ceeker.state.store :as store]
+            [ceeker.tmux.capture :as capture]
             [ceeker.tmux.pane :as pane]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- temp-dir
@@ -163,3 +165,68 @@
   (let [pid (str (.pid (java.lang.ProcessHandle/current)))]
     (is (= :not-found (pane/find-agent-in-tree
                        pid :claude-code)))))
+
+;; --- capture-state-for-closed-session reactivation tests ---
+
+(deftest test-closed-session-idle-not-reactivated
+  (testing "Closed session with :idle detection is NOT reactivated
+            (prevents closed->idle flapping when pane has plain shell)"
+    (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
+          session {:agent-status :closed
+                   :superseded false
+                   :pane-id "%99"
+                   :agent-type :claude-code}]
+      (with-redefs [capture/detect-agent-state
+                    (fn [_ _] {:status :idle :waiting-reason nil})]
+        (is (nil? (capture-fn session)))))))
+
+(deftest test-closed-session-running-reactivated
+  (testing "Closed session with :running detection IS reactivated"
+    (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
+          session {:agent-status :closed
+                   :superseded false
+                   :pane-id "%99"
+                   :agent-type :claude-code}]
+      (with-redefs [capture/detect-agent-state
+                    (fn [_ _] {:status :running :waiting-reason nil})]
+        (let [result (capture-fn session)]
+          (is (some? result))
+          (is (= :running (:agent-status result))))))))
+
+(deftest test-closed-session-waiting-reactivated
+  (testing "Closed session with :waiting detection IS reactivated"
+    (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
+          session {:agent-status :closed
+                   :superseded false
+                   :pane-id "%99"
+                   :agent-type :claude-code}]
+      (with-redefs [capture/detect-agent-state
+                    (fn [_ _] {:status :waiting
+                               :waiting-reason "respond"})]
+        (let [result (capture-fn session)]
+          (is (some? result))
+          (is (= :waiting (:agent-status result)))
+          (is (str/includes? (:last-message result)
+                             "waiting")))))))
+
+(deftest test-closed-superseded-not-reactivated
+  (testing "Superseded closed session is never reactivated"
+    (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
+          session {:agent-status :closed
+                   :superseded true
+                   :pane-id "%99"
+                   :agent-type :claude-code}]
+      (with-redefs [capture/detect-agent-state
+                    (fn [_ _] {:status :running :waiting-reason nil})]
+        (is (nil? (capture-fn session)))))))
+
+(deftest test-closed-no-pane-not-reactivated
+  (testing "Closed session without pane-id is never reactivated"
+    (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
+          session {:agent-status :closed
+                   :superseded false
+                   :pane-id nil
+                   :agent-type :claude-code}]
+      (with-redefs [capture/detect-agent-state
+                    (fn [_ _] {:status :running :waiting-reason nil})]
+        (is (nil? (capture-fn session)))))))
