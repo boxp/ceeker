@@ -13,14 +13,31 @@
   "Pane liveness check interval in ticks (~500ms each)."
   20)
 
-(defn- maybe-check-panes!
-  "Runs pane liveness check and state refresh when tick
-   is due. Combines stale detection with capture-pane
-   based intermediate state updates."
-  [tick state-dir]
-  (when (zero? (mod tick check-interval))
+(defn- run-pane-check!
+  "Executes pane liveness check and state refresh.
+   Catches all exceptions so failures never propagate
+   to the caller."
+  [state-dir]
+  (try
     (pane/close-stale-sessions! state-dir)
-    (pane/refresh-session-states! state-dir)))
+    (pane/refresh-session-states! state-dir)
+    (catch Exception e
+      (.println System/err
+                (str "ceeker: pane check failed: "
+                     (.getMessage e))))))
+
+(defn- maybe-check-panes!
+  "Schedules pane liveness check asynchronously when tick
+   is due. Skips if a prior check is still running.
+   bg-check is a per-instance atom holding the current
+   background future. Errors are logged to stderr without
+   affecting the TUI loop."
+  [tick state-dir bg-check]
+  (when (zero? (mod tick check-interval))
+    (let [prev @bg-check]
+      (when (or (nil? prev) (realized? prev))
+        (reset! bg-check
+                (future (run-pane-check! state-dir)))))))
 
 (defn- get-session-list
   "Gets session list from state store."
@@ -239,26 +256,29 @@
 (defn- tui-loop
   "Main TUI render-input loop."
   [terminal w state-dir]
-  (loop [sel 0 msg nil fs f/empty-filter
-         sm? false sb nil display-mode :auto tick 0]
-    (maybe-check-panes! tick state-dir)
-    (let [sessions (get-session-list state-dir)
-          visible (filtered-sorted sessions fs)
-          mx (max 0 (dec (count visible)))
-          cl (clamp sel 0 mx)
-          width (get-terminal-width terminal)
-          scr (render-screen sessions cl fs sm? sb msg
-                             width display-mode)]
-      (print scr)
-      (flush)
-      (let [r (process-key
-               (wait-for-input terminal w)
-               cl sm? sb visible mx fs display-mode)]
-        (when-let [next-state
-                   (next-loop-state r cl fs sm? sb display-mode)]
-          (let [[nsel nmsg nfs nsm? nsb ndm]
-                next-state]
-            (recur nsel nmsg nfs nsm? nsb ndm (inc tick))))))))
+  (let [bg-check (atom nil)]
+    (loop [sel 0 msg nil fs f/empty-filter
+           sm? false sb nil display-mode :auto tick 0]
+      (maybe-check-panes! tick state-dir bg-check)
+      (let [sessions (get-session-list state-dir)
+            visible (filtered-sorted sessions fs)
+            mx (max 0 (dec (count visible)))
+            cl (clamp sel 0 mx)
+            width (get-terminal-width terminal)
+            scr (render-screen sessions cl fs sm? sb msg
+                               width display-mode)]
+        (print scr)
+        (flush)
+        (let [r (process-key
+                 (wait-for-input terminal w)
+                 cl sm? sb visible mx fs display-mode)]
+          (when-let [next-state
+                     (next-loop-state r cl fs sm? sb
+                                      display-mode)]
+            (let [[nsel nmsg nfs nsm? nsb ndm]
+                  next-state]
+              (recur nsel nmsg nfs nsm? nsb ndm
+                     (inc tick)))))))))
 
 (defn start-tui!
   "Runs the TUI application loop."

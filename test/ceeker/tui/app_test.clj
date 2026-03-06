@@ -1,5 +1,6 @@
 (ns ceeker.tui.app-test
   (:require [ceeker.tui.app :as app]
+            [ceeker.tmux.pane :as pane]
             [ceeker.tui.filter :as f]
             [clojure.test :refer [deftest is testing]]))
 
@@ -221,3 +222,74 @@
         (let [r (#'ceeker.tui.app/filter-key-result
                  \s fs)]
           (recur (:fs r) expected (inc i)))))))
+
+;; --- async pane check tests ---
+
+(deftest test-maybe-check-panes-returns-immediately
+  (testing "maybe-check-panes! returns without waiting for
+            pane check to complete"
+    (let [started (promise)
+          blocker (promise)
+          bg-check (atom nil)]
+      (with-redefs [pane/close-stale-sessions!
+                    (fn [_]
+                      (deliver started true)
+                      @blocker)
+                    pane/refresh-session-states!
+                    (fn [_])]
+        (let [t0 (System/nanoTime)]
+          (#'ceeker.tui.app/maybe-check-panes!
+           0 nil bg-check)
+          (let [elapsed-ms (/ (- (System/nanoTime) t0)
+                              1000000.0)]
+            (is (< elapsed-ms 500)
+                "should return immediately, not block")))
+        (is (deref started 2000 false)
+            "background check should have started")
+        (deliver blocker :done)))))
+
+(deftest test-maybe-check-panes-skips-when-running
+  (testing "does not start a new check while prior is running"
+    (let [call-count (atom 0)
+          blocker (promise)
+          bg-check (atom nil)]
+      (with-redefs [pane/close-stale-sessions!
+                    (fn [_]
+                      (swap! call-count inc)
+                      @blocker)
+                    pane/refresh-session-states!
+                    (fn [_])]
+        (#'ceeker.tui.app/maybe-check-panes!
+         0 nil bg-check)
+        (#'ceeker.tui.app/maybe-check-panes!
+         20 nil bg-check)
+        (deliver blocker :done)
+        (Thread/sleep 100)
+        (is (= 1 @call-count)
+            "second check should be skipped")))))
+
+(deftest test-maybe-check-panes-continues-after-error
+  (testing "TUI loop continues when pane check throws"
+    (let [bg-check (atom nil)]
+      (with-redefs [pane/close-stale-sessions!
+                    (fn [_]
+                      (throw
+                       (Exception. "tmux unavailable")))
+                    pane/refresh-session-states!
+                    (fn [_])]
+        (#'ceeker.tui.app/maybe-check-panes!
+         0 nil bg-check)
+        (Thread/sleep 200)
+        (is (realized? @bg-check)
+            "future should complete despite error"))
+      ;; Next check should start normally
+      (let [called (atom false)]
+        (with-redefs [pane/close-stale-sessions!
+                      (fn [_] (reset! called true))
+                      pane/refresh-session-states!
+                      (fn [_])]
+          (#'ceeker.tui.app/maybe-check-panes!
+           20 nil bg-check)
+          (Thread/sleep 200)
+          (is @called
+              "next check starts after prior error"))))))
