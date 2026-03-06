@@ -168,10 +168,27 @@
    Default: 5 seconds."
   5000)
 
+(defn- persist-hook-async!
+  "Persists hook data and cleans stale sessions in a
+   background future. Errors are caught and logged."
+  [state-dir session-id session-data]
+  (future
+    (try
+      (if state-dir
+        (store/update-session!
+         state-dir session-id session-data)
+        (store/update-session!
+         session-id session-data))
+      (pane/close-stale-sessions! state-dir)
+      (catch Exception e
+        (binding [*out* *err*]
+          (println
+           (str "ceeker: hook background "
+                "error: "
+                (.getMessage e))))))))
+
 (defn handle-hook-async!
   "Like handle-hook! but runs IO in background.
-   Parses and normalizes synchronously, then persists
-   to store and cleans stale sessions in a future.
    Returns {:session-data <map> :task <future>}."
   ([agent-type event-type stdin-input]
    (handle-hook-async!
@@ -186,24 +203,12 @@
             event-type payload))
          session-data (normalize-event
                        agent-type effective-event
-                       payload)
-         session-id (:session-id session-data)
-         task (future
-                (try
-                  (if state-dir
-                    (store/update-session!
-                     state-dir session-id session-data)
-                    (store/update-session!
-                     session-id session-data))
-                  (pane/close-stale-sessions! state-dir)
-                  (catch Exception e
-                    (binding [*out* *err*]
-                      (println
-                       (str "ceeker: hook background "
-                            "error: "
-                            (.getMessage e)))))))]
+                       payload)]
      {:session-data session-data
-      :task task})))
+      :task (persist-hook-async!
+             state-dir
+             (:session-id session-data)
+             session-data)})))
 
 (defn await-hook-task!
   "Waits for a background hook task with timeout.
