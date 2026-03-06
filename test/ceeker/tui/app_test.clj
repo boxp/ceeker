@@ -1,6 +1,6 @@
 (ns ceeker.tui.app-test
-  (:require [ceeker.tui.app :as app]
-            [ceeker.tmux.pane :as pane]
+  (:require [ceeker.tmux.pane :as pane]
+            [ceeker.tui.app :as app]
             [ceeker.tui.filter :as f]
             [clojure.test :refer [deftest is testing]]))
 
