@@ -389,9 +389,9 @@
         :last-updated "2025-01-01T00:00:00Z"})
       ;; Fire multiple Claude hook events
       (doseq [evt ["Notification" "PreToolUse"
-                    "PostToolUse" "SubagentStart"
-                    "SubagentStop" "Stop"
-                    "SessionStart" "TaskCompleted"]]
+                   "PostToolUse" "SubagentStart"
+                   "SubagentStop" "Stop"
+                   "SessionStart" "TaskCompleted"]]
         (handler/handle-hook!
          dir "claude" evt
          (json/generate-string
