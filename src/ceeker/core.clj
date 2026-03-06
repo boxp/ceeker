@@ -64,7 +64,9 @@
                   (read-stdin))}))
 
 (defn- handle-hook-command
-  "Handles the 'hook' subcommand."
+  "Handles the 'hook' subcommand.
+   Runs hook IO asynchronously with timeout to avoid
+   blocking the calling agent process."
   [args]
   (let [agent-type (first args)
         raw-second (second args)]
@@ -75,14 +77,17 @@
       (System/exit 1))
     (let [{:keys [event-type payload]}
           (resolve-hook-args args raw-second)
-          result (hook/handle-hook!
-                  agent-type event-type payload)]
+          {:keys [session-data task]}
+          (hook/handle-hook-async!
+           agent-type event-type payload)]
       (binding [*out* *err*]
         (println (str "ceeker: recorded "
-                      (:agent-type result) " "
+                      (:agent-type session-data) " "
                       (or event-type "notify")
                       " for "
-                      (:session-id result)))))))
+                      (:session-id session-data))))
+      (hook/await-hook-task!
+       task hook/hook-timeout-ms))))
 
 (defn- print-errors!
   "Prints CLI errors to stderr and exits."
