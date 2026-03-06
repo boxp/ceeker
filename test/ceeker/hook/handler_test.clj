@@ -404,8 +404,8 @@
   (let [dir (temp-dir)]
     (try
       (with-redefs
-        [store/update-session!
-         (fn [& _] (Thread/sleep 500))]
+       [store/update-session!
+        (fn [& _] (Thread/sleep 500))]
         (let [payload
               (json/generate-string
                {:session_id "slow-1"
@@ -430,9 +430,9 @@
   (let [dir (temp-dir)]
     (try
       (with-redefs
-        [store/update-session!
-         (fn [& _]
-           (throw (ex-info "simulated failure" {})))]
+       [store/update-session!
+        (fn [& _]
+          (throw (ex-info "simulated failure" {})))]
         (let [payload
               (json/generate-string
                {:session_id "err-1"
