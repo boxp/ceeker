@@ -128,6 +128,18 @@ notify = ["ceeker", "hook", "codex"]
 
 Codex appends the JSON payload as the last argument of the `notify` command (via argv, not stdin).
 
+## Async Hook Execution
+
+Hook CLI commands (`ceeker hook ...`) run IO operations (state persistence and stale session cleanup) asynchronously in a background thread. This prevents slow file locks or tmux queries from blocking the calling agent process.
+
+**Behavior:**
+
+- Payload parsing and normalization happen synchronously (fast)
+- State persistence (`sessions.edn` write) and stale session cleanup run in background
+- Background operations have a **5-second timeout** — if exceeded, ceeker exits without waiting
+- Background errors are logged to stderr but **never propagated** to the calling agent
+- The agent process is never blocked by hook failures or delays
+
 ## Automatic Session Cleanup
 
 When a tmux pane is closed, the corresponding session automatically transitions to the `Closed` state.

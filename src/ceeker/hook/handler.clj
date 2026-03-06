@@ -162,3 +162,65 @@
         session-id session-data))
      (pane/close-stale-sessions! state-dir)
      session-data)))
+
+(def ^:const hook-timeout-ms
+  "Maximum time (ms) to wait for background hook persistence.
+   Default: 5 seconds."
+  5000)
+
+(defn handle-hook-async!
+  "Like handle-hook! but runs IO in background.
+   Parses and normalizes synchronously, then persists
+   to store and cleans stale sessions in a future.
+   Returns {:session-data <map> :task <future>}."
+  ([agent-type event-type stdin-input]
+   (handle-hook-async!
+    nil agent-type event-type stdin-input))
+  ([state-dir agent-type event-type stdin-input]
+   (let [payload (or (parse-hook-payload stdin-input) {})
+         effective-event
+         (case agent-type
+           "codex" (resolve-codex-event
+                    event-type payload)
+           (resolve-claude-event
+            event-type payload))
+         session-data (normalize-event
+                       agent-type effective-event
+                       payload)
+         session-id (:session-id session-data)
+         task (future
+                (try
+                  (if state-dir
+                    (store/update-session!
+                     state-dir session-id session-data)
+                    (store/update-session!
+                     session-id session-data))
+                  (pane/close-stale-sessions! state-dir)
+                  (catch Exception e
+                    (binding [*out* *err*]
+                      (println
+                       (str "ceeker: hook background "
+                            "error: "
+                            (.getMessage e)))))))]
+     {:session-data session-data
+      :task task})))
+
+(defn await-hook-task!
+  "Waits for a background hook task with timeout.
+   Returns :completed, :timeout, or :error.
+   Errors are logged to stderr, never propagated."
+  [task timeout-ms]
+  (try
+    (let [result (deref task timeout-ms ::timeout)]
+      (if (= result ::timeout)
+        (do (binding [*out* *err*]
+              (println
+               "ceeker: hook background timed out"))
+            :timeout)
+        :completed))
+    (catch Exception e
+      (binding [*out* *err*]
+        (println
+         (str "ceeker: hook await error: "
+              (.getMessage e))))
+      :error)))
