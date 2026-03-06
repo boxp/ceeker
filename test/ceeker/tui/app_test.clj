@@ -262,6 +262,19 @@
           (async/close! stop-ch)
           (deliver blocker :done))))))
 
+(deftest test-pane-checker-runs-immediately
+  (testing "checker runs initial check before first interval"
+    (let [called (promise)]
+      (with-redefs [pane/close-stale-sessions!
+                    (fn [_] (deliver called true))
+                    pane/refresh-session-states!
+                    (fn [_])]
+        (let [stop-ch (#'ceeker.tui.app/start-pane-checker!
+                       nil 60000)]
+          (is (deref called 2000 false)
+              "initial check should run immediately")
+          (async/close! stop-ch))))))
+
 (deftest test-pane-checker-executes-periodically
   (testing "checker runs pane check after interval"
     (let [call-count (atom 0)]
@@ -275,8 +288,8 @@
           (Thread/sleep 200)
           (async/close! stop-ch)
           (Thread/sleep 100)
-          (is (>= @call-count 1)
-              "should have run at least once"))))))
+          (is (>= @call-count 2)
+              "initial + periodic runs"))))))
 
 (deftest test-pane-checker-continues-after-error
   (testing "checker continues when pane check throws"

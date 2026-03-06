@@ -36,6 +36,7 @@
   ([state-dir interval-ms]
    (let [stop-ch (async/chan)]
      (async/thread
+       (run-pane-check! state-dir)
        (loop []
          (let [[_ ch] (async/alts!!
                        [stop-ch
