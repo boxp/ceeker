@@ -253,6 +253,21 @@
     :else [(get r :sel cl) (:msg r) (:fs r)
            (get r :sm? false) (:sb r) (:dm r)]))
 
+(defn- render-and-read
+  "Renders current state and reads one key event."
+  [terminal w state-dir sel msg fs sm? sb display-mode]
+  (let [sessions (get-session-list state-dir)
+        visible (filtered-sorted sessions fs)
+        mx (max 0 (dec (count visible)))
+        cl (clamp sel 0 mx)
+        width (get-terminal-width terminal)
+        scr (render-screen sessions cl fs sm? sb msg
+                           width display-mode)]
+    (print scr)
+    (flush)
+    {:key (wait-for-input terminal w)
+     :cl cl :visible visible :mx mx}))
+
 (defn- tui-loop
   "Main TUI render-input loop."
   [terminal w state-dir]
@@ -260,25 +275,16 @@
     (loop [sel 0 msg nil fs f/empty-filter
            sm? false sb nil display-mode :auto tick 0]
       (maybe-check-panes! tick state-dir bg-check)
-      (let [sessions (get-session-list state-dir)
-            visible (filtered-sorted sessions fs)
-            mx (max 0 (dec (count visible)))
-            cl (clamp sel 0 mx)
-            width (get-terminal-width terminal)
-            scr (render-screen sessions cl fs sm? sb msg
-                               width display-mode)]
-        (print scr)
-        (flush)
-        (let [r (process-key
-                 (wait-for-input terminal w)
-                 cl sm? sb visible mx fs display-mode)]
-          (when-let [next-state
-                     (next-loop-state r cl fs sm? sb
-                                      display-mode)]
-            (let [[nsel nmsg nfs nsm? nsb ndm]
-                  next-state]
-              (recur nsel nmsg nfs nsm? nsb ndm
-                     (inc tick)))))))))
+      (let [{:keys [key cl visible mx]}
+            (render-and-read terminal w state-dir
+                             sel msg fs sm? sb display-mode)
+            r (process-key key cl sm? sb visible mx
+                           fs display-mode)]
+        (when-let [ns (next-loop-state r cl fs sm? sb
+                                       display-mode)]
+          (let [[nsel nmsg nfs nsm? nsb ndm] ns]
+            (recur nsel nmsg nfs nsm? nsb ndm
+                   (inc tick))))))))
 
 (defn start-tui!
   "Runs the TUI application loop."
