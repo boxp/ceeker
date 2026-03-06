@@ -45,11 +45,6 @@
                    (str (java.util.UUID/randomUUID)))
    :cwd (or (:cwd payload) "")})
 
-(defn- tool-message
-  "Builds a tool event message string."
-  [prefix payload]
-  (str prefix (or (:tool_name payload) "tool")))
-
 (defn- claude-event-fields
   "Returns [status message] for a Claude event type.
    Only Notification and SessionEnd update last-message.
