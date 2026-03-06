@@ -25,15 +25,17 @@
   (or (System/getenv "TMUX_PANE") ""))
 
 (defn- make-session
-  "Creates a normalized session state map."
+  "Creates a normalized session state map.
+   When message is nil, :last-message is omitted so that
+   store/merge preserves the existing value."
   [session-id agent-type status cwd message]
-  {:session-id session-id
-   :agent-type agent-type
-   :agent-status status
-   :cwd cwd
-   :pane-id (current-pane-id)
-   :last-message message
-   :last-updated (current-timestamp)})
+  (cond-> {:session-id session-id
+           :agent-type agent-type
+           :agent-status status
+           :cwd cwd
+           :pane-id (current-pane-id)
+           :last-updated (current-timestamp)}
+    (some? message) (assoc :last-message message)))
 
 (defn- extract-claude-identity
   "Extracts session-id and cwd from Claude payload.
@@ -43,31 +45,27 @@
                    (str (java.util.UUID/randomUUID)))
    :cwd (or (:cwd payload) "")})
 
-(defn- tool-message
-  "Builds a tool event message string."
-  [prefix payload]
-  (str prefix (or (:tool_name payload) "tool")))
-
 (defn- claude-event-fields
   "Returns [status message] for a Claude event type.
-   Supports all official hook events per the spec."
+   Only Notification and SessionEnd update last-message.
+   All other events return nil message to preserve the
+   existing last-message in the store."
   [event-type payload]
   (case event-type
-    "SessionStart" [:running "session started"]
     "Notification" [:running
-                    (or (:title payload)
-                        (:message payload)
+                    (or (:message payload)
+                        (:title payload)
                         "notification")]
-    "Stop" [:completed "session ended"]
     "SessionEnd" [:completed "session terminated"]
-    "SubagentStart" [:running "subagent spawned"]
-    "SubagentStop" [:running "subagent completed"]
-    "PreToolUse" [:running (tool-message "using: " payload)]
-    "PostToolUse" [:running (tool-message "used: " payload)]
-    "PostToolUseFailure" [:running
-                          (tool-message "failed: " payload)]
-    "TaskCompleted" [:completed "task completed"]
-    [:running (str "event: " event-type)]))
+    "SessionStart" [:running nil]
+    "Stop" [:completed nil]
+    "SubagentStart" [:running nil]
+    "SubagentStop" [:running nil]
+    "PreToolUse" [:running nil]
+    "PostToolUse" [:running nil]
+    "PostToolUseFailure" [:running nil]
+    "TaskCompleted" [:completed nil]
+    [:running nil]))
 
 (defn- normalize-claude-event
   "Normalizes a Claude Code hook event into session state."
