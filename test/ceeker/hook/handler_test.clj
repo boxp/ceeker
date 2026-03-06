@@ -371,3 +371,89 @@
 (deftest test-current-pane-id-returns-string
   (let [pane-id (handler/current-pane-id)]
     (is (string? pane-id))))
+
+;; --- Claude hook: last-message preservation ---
+
+(deftest test-claude-hook-does-not-update-last-message
+  (let [dir (temp-dir)]
+    (try
+      ;; Seed an existing session with a known last-message
+      (store/update-session!
+       dir "preserve-1"
+       {:session-id "preserve-1"
+        :agent-type :claude-code
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id ""
+        :last-message "user prompt text"
+        :last-updated "2025-01-01T00:00:00Z"})
+      ;; Fire multiple Claude hook events
+      (doseq [evt ["Notification" "PreToolUse"
+                    "PostToolUse" "SubagentStart"
+                    "SubagentStop" "Stop"
+                    "SessionStart" "TaskCompleted"]]
+        (handler/handle-hook!
+         dir "claude" evt
+         (json/generate-string
+          {:session_id "preserve-1"
+           :cwd "/tmp/work"
+           :hook_event_name evt
+           :tool_name "Bash"
+           :title "noisy hook"})))
+      ;; Verify last-message is unchanged
+      (let [stored (store/read-sessions dir)
+            session (get-in stored
+                            [:sessions "preserve-1"])]
+        (is (= "user prompt text"
+               (:last-message session))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-codex-hook-still-updates-last-message
+  (let [dir (temp-dir)]
+    (try
+      ;; Seed a Codex session
+      (store/update-session!
+       dir "codex-upd-1"
+       {:session-id "codex-upd-1"
+        :agent-type :codex
+        :agent-status :running
+        :cwd "/tmp/work"
+        :pane-id ""
+        :last-message "old message"
+        :last-updated "2025-01-01T00:00:00Z"})
+      ;; Fire a Codex notification hook
+      (handler/handle-hook!
+       dir "codex" "notification"
+       (json/generate-string
+        {:session_id "codex-upd-1"
+         :message "new codex message"
+         :cwd "/tmp/work"}))
+      ;; Verify last-message IS updated for Codex
+      (let [stored (store/read-sessions dir)
+            session (get-in stored
+                            [:sessions "codex-upd-1"])]
+        (is (= "new codex message"
+               (:last-message session))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-claude-new-session-has-no-last-message
+  (let [dir (temp-dir)]
+    (try
+      ;; First hook for a brand-new Claude session
+      (handler/handle-hook!
+       dir "claude" "SessionStart"
+       (json/generate-string
+        {:session_id "brand-new"
+         :cwd "/tmp/new"
+         :hook_event_name "SessionStart"}))
+      ;; Stored session should have nil last-message
+      (let [stored (store/read-sessions dir)
+            session (get-in stored
+                            [:sessions "brand-new"])]
+        (is (some? session))
+        (is (nil? (:last-message session)))
+        (is (= :running (:agent-status session))))
+      (finally
+        (cleanup-dir dir)))))

@@ -140,7 +140,10 @@
       "Notification"))
 
 (defn handle-hook!
-  "Handles a hook event: parses, normalizes, writes to store."
+  "Handles a hook event: parses, normalizes, writes to store.
+   For Claude Code hooks, last-message is omitted from the
+   store update so that noisy hook events do not overwrite
+   the user-visible message."
   ([agent-type event-type stdin-input]
    (handle-hook! nil agent-type event-type stdin-input))
   ([state-dir agent-type event-type stdin-input]
@@ -154,11 +157,14 @@
          session-data (normalize-event
                        agent-type effective-event
                        payload)
-         session-id (:session-id session-data)]
+         session-id (:session-id session-data)
+         store-data (if (= "claude" agent-type)
+                      (dissoc session-data :last-message)
+                      session-data)]
      (if state-dir
        (store/update-session!
-        state-dir session-id session-data)
+        state-dir session-id store-data)
        (store/update-session!
-        session-id session-data))
+        session-id store-data))
      (pane/close-stale-sessions! state-dir)
      session-data)))
