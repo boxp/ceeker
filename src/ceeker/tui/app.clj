@@ -40,7 +40,8 @@
        (loop []
          (let [[_ ch] (async/alts!!
                        [stop-ch
-                        (async/timeout interval-ms)])]
+                        (async/timeout interval-ms)]
+                       :priority true)]
            (when-not (= ch stop-ch)
              (run-pane-check! state-dir)
              (recur)))))
