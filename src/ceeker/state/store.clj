@@ -107,7 +107,7 @@
    Acquires a JVM-level lock first to prevent
    OverlappingFileLockException from concurrent threads."
   [dir f]
-  (.lock jvm-lock)
+  (.lock ^ReentrantLock jvm-lock)
   (try
     (let [lock-path (str dir "/sessions.lock")
           _ (ensure-state-dir! dir)
@@ -124,7 +124,7 @@
           (.close channel)
           (.close lock-file))))
     (finally
-      (.unlock jvm-lock))))
+      (.unlock ^ReentrantLock jvm-lock))))
 
 (defn read-sessions
   "Reads all sessions from the state store."

@@ -269,22 +269,24 @@
      :cl cl :visible visible :mx mx}))
 
 (defn- tui-loop
-  "Main TUI render-input loop."
+  "Main TUI render-input loop.
+   Pane checks are dispatched after render so the first
+   frame is never blocked by the background cleanup."
   [terminal w state-dir]
   (let [bg-check (atom nil)]
     (loop [sel 0 msg nil fs f/empty-filter
            sm? false sb nil display-mode :auto tick 0]
-      (maybe-check-panes! tick state-dir bg-check)
       (let [{:keys [key cl visible mx]}
             (render-and-read terminal w state-dir
-                             sel msg fs sm? sb display-mode)
-            r (process-key key cl sm? sb visible mx
-                           fs display-mode)]
-        (when-let [ns (next-loop-state r cl fs sm? sb
-                                       display-mode)]
-          (let [[nsel nmsg nfs nsm? nsb ndm] ns]
-            (recur nsel nmsg nfs nsm? nsb ndm
-                   (inc tick))))))))
+                             sel msg fs sm? sb display-mode)]
+        (maybe-check-panes! tick state-dir bg-check)
+        (let [r (process-key key cl sm? sb visible mx
+                             fs display-mode)]
+          (when-let [ns (next-loop-state r cl fs sm? sb
+                                         display-mode)]
+            (let [[nsel nmsg nfs nsm? nsb ndm] ns]
+              (recur nsel nmsg nfs nsm? nsb ndm
+                     (inc tick)))))))))
 
 (defn start-tui!
   "Runs the TUI application loop."
