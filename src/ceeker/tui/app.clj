@@ -288,13 +288,13 @@
     (let [{:keys [key cl visible mx]}
           (render-and-read terminal w state-dir
                            sel msg fs sm? sb
-                           display-mode)]
-      (let [r (process-key key cl sm? sb visible mx
-                           fs display-mode)]
-        (when-let [ns (next-loop-state r cl fs sm? sb
-                                       display-mode)]
-          (let [[nsel nmsg nfs nsm? nsb ndm] ns]
-            (recur nsel nmsg nfs nsm? nsb ndm)))))))
+                           display-mode)
+          r (process-key key cl sm? sb visible mx
+                         fs display-mode)]
+      (when-let [ns (next-loop-state r cl fs sm? sb
+                                     display-mode)]
+        (let [[nsel nmsg nfs nsm? nsb ndm] ns]
+          (recur nsel nmsg nfs nsm? nsb ndm))))))
 
 (defn start-tui!
   "Runs the TUI application loop."
