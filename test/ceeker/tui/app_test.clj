@@ -277,52 +277,54 @@
 
 (deftest test-pane-checker-executes-periodically
   (testing "checker runs pane check after interval"
-    (let [call-count (atom 0)]
+    (let [second-call (promise)]
       (with-redefs [pane/close-stale-sessions!
-                    (fn [_]
-                      (swap! call-count inc))
+                    (let [cnt (atom 0)]
+                      (fn [_]
+                        (when (>= (swap! cnt inc) 2)
+                          (deliver second-call true))))
                     pane/refresh-session-states!
                     (fn [_])]
         (let [stop-ch (#'ceeker.tui.app/start-pane-checker!
                        nil 50)]
-          (Thread/sleep 200)
-          (async/close! stop-ch)
-          (Thread/sleep 100)
-          (is (>= @call-count 2)
-              "initial + periodic runs"))))))
+          (is (deref second-call 5000 false)
+              "initial + periodic runs")
+          (async/close! stop-ch))))))
 
 (deftest test-pane-checker-continues-after-error
   (testing "checker continues when pane check throws"
-    (let [call-count (atom 0)]
+    (let [second-call (promise)]
       (with-redefs [pane/close-stale-sessions!
-                    (fn [_]
-                      (swap! call-count inc)
-                      (throw
-                       (Exception. "tmux unavailable")))
+                    (let [cnt (atom 0)]
+                      (fn [_]
+                        (when (>= (swap! cnt inc) 2)
+                          (deliver second-call true))
+                        (throw
+                         (Exception. "tmux unavailable"))))
                     pane/refresh-session-states!
                     (fn [_])]
         (let [stop-ch (#'ceeker.tui.app/start-pane-checker!
                        nil 50)]
-          (Thread/sleep 200)
-          (async/close! stop-ch)
-          (Thread/sleep 100)
-          (is (>= @call-count 2)
-              "should retry after error"))))))
+          (is (deref second-call 5000 false)
+              "should retry after error")
+          (async/close! stop-ch))))))
 
 (deftest test-pane-checker-stops-on-close
   (testing "no checks after stop-ch is closed"
-    (let [call-count (atom 0)]
+    (let [call-count (atom 0)
+          first-call (promise)]
       (with-redefs [pane/close-stale-sessions!
                     (fn [_]
-                      (swap! call-count inc))
+                      (swap! call-count inc)
+                      (deliver first-call true))
                     pane/refresh-session-states!
                     (fn [_])]
         (let [stop-ch (#'ceeker.tui.app/start-pane-checker!
-                       nil 50)]
-          (Thread/sleep 150)
+                       nil 60000)]
+          (deref first-call 5000 false)
           (async/close! stop-ch)
-          (Thread/sleep 100)
+          (Thread/sleep 200)
           (let [count-at-stop @call-count]
-            (Thread/sleep 200)
+            (Thread/sleep 500)
             (is (= count-at-stop @call-count)
                 "no more checks after stop")))))))

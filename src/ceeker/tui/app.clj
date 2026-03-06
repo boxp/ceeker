@@ -281,7 +281,7 @@
 (defn- tui-loop
   "Main TUI render-input loop.
    Pane checks run in a separate async/thread worker."
-  [terminal w state-dir stop-ch]
+  [terminal w state-dir]
   (loop [sel 0 msg nil fs f/empty-filter
          sm? false sb nil display-mode :auto]
     (let [{:keys [key cl visible mx]}
@@ -303,7 +303,7 @@
          w (create-watcher-for state-dir)
          stop-ch (start-pane-checker! state-dir)]
      (try
-       (tui-loop terminal w state-dir stop-ch)
+       (tui-loop terminal w state-dir)
        (finally
          (async/close! stop-ch)
          (print "\033[2J\033[H")
