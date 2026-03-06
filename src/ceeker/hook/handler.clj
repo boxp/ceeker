@@ -139,11 +139,17 @@
       (:hook_event_name payload)
       "Notification"))
 
+(defn- store-session-data
+  "Returns session data suitable for store persistence.
+   For Claude hooks, omits :last-message to prevent noisy
+   hook events from overwriting the user-visible message."
+  [agent-type session-data]
+  (if (= "claude" agent-type)
+    (dissoc session-data :last-message)
+    session-data))
+
 (defn handle-hook!
-  "Handles a hook event: parses, normalizes, writes to store.
-   For Claude Code hooks, last-message is omitted from the
-   store update so that noisy hook events do not overwrite
-   the user-visible message."
+  "Handles a hook event: parses, normalizes, writes to store."
   ([agent-type event-type stdin-input]
    (handle-hook! nil agent-type event-type stdin-input))
   ([state-dir agent-type event-type stdin-input]
@@ -158,9 +164,8 @@
                        agent-type effective-event
                        payload)
          session-id (:session-id session-data)
-         store-data (if (= "claude" agent-type)
-                      (dissoc session-data :last-message)
-                      session-data)]
+         store-data (store-session-data
+                     agent-type session-data)]
      (if state-dir
        (store/update-session!
         state-dir session-id store-data)
