@@ -143,17 +143,17 @@
   (testing "falls back to cwd when pane-id switch fails"
     (let [calls (atom [])]
       (with-redefs
-        [ceeker.tui.app/switch-tmux-pane!
-         (fn [target]
-           (swap! calls conj target)
-           (if (= target "%99")
-             {:success false
-              :error "no such pane"}
-             {:success true :target target}))
-         ceeker.tui.app/find-tmux-pane
-         (fn [cwd]
-           (when (= cwd "/home/user/project")
-             "main:0.1"))]
+       [ceeker.tui.app/switch-tmux-pane!
+        (fn [target]
+          (swap! calls conj target)
+          (if (= target "%99")
+            {:success false
+             :error "no such pane"}
+            {:success true :target target}))
+        ceeker.tui.app/find-tmux-pane
+        (fn [cwd]
+          (when (= cwd "/home/user/project")
+            "main:0.1"))]
         (let [session {:cwd "/home/user/project"
                        :pane-id "%99"
                        :session-id "test-3"
