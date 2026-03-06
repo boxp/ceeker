@@ -250,7 +250,7 @@
                     dir "claude" "PreToolUse" tool-payload)
             stored (store/read-sessions dir)
             session (get-in stored
-                           [:sessions "preserve-1"])]
+                            [:sessions "preserve-1"])]
         (is (not (contains? result :last-message))
             "PreToolUse result should not contain :last-message")
         (is (= "Important update"
