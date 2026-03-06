@@ -22,6 +22,7 @@ brew install ceeker
 To update:
 
 ```bash
+brew update
 brew upgrade ceeker
 ```
 
