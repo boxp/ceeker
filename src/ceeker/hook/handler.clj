@@ -165,8 +165,8 @@
 
 (def ^:const hook-timeout-ms
   "Maximum time (ms) to wait for background hook persistence.
-   Default: 5 seconds."
-  5000)
+   Default: 2 seconds."
+  2000)
 
 (defn- persist-hook-async!
   "Persists hook data and cleans stale sessions in a

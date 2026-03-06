@@ -136,7 +136,7 @@ Hook CLI commands (`ceeker hook ...`) run IO operations (state persistence and s
 
 - Payload parsing and normalization happen synchronously (fast)
 - State persistence (`sessions.edn` write) and stale session cleanup run in background
-- Background operations have a **5-second timeout** — if exceeded, ceeker exits without waiting
+- Background operations have a **2-second timeout** — if exceeded, ceeker exits without waiting
 - Background errors are logged to stderr but **never propagated** to the calling agent
 - The agent process is never blocked by hook failures or delays
 
