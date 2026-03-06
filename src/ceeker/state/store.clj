@@ -6,7 +6,8 @@
   (:import [java.io File RandomAccessFile]
            [java.nio.channels FileLock]
            [java.nio.file Files]
-           [java.nio.file.attribute PosixFilePermissions]))
+           [java.nio.file.attribute PosixFilePermissions]
+           [java.util.concurrent.locks ReentrantLock]))
 
 (defn state-dir
   "Returns the state directory path."
@@ -93,22 +94,37 @@
   [path state]
   (spit path (pr-str state)))
 
+(def ^:private jvm-lock
+  "JVM-level lock to coordinate threads within the same
+   process. Prevents OverlappingFileLockException when
+   async pane checks and the render loop both access
+   the state file concurrently. The file lock handles
+   cross-process coordination."
+  (ReentrantLock.))
+
 (defn with-file-lock
-  "Executes f while holding an exclusive file lock."
+  "Executes f while holding an exclusive file lock.
+   Acquires a JVM-level lock first to prevent
+   OverlappingFileLockException from concurrent threads."
   [dir f]
-  (let [lock-path (str dir "/sessions.lock")
-        _ (ensure-state-dir! dir)
-        lock-file (RandomAccessFile. ^String lock-path "rw")
-        channel (.getChannel lock-file)]
-    (try
-      (let [^FileLock lock (.lock channel)]
-        (try
-          (f)
-          (finally
-            (.release lock))))
-      (finally
-        (.close channel)
-        (.close lock-file)))))
+  (.lock jvm-lock)
+  (try
+    (let [lock-path (str dir "/sessions.lock")
+          _ (ensure-state-dir! dir)
+          lock-file (RandomAccessFile.
+                     ^String lock-path "rw")
+          channel (.getChannel lock-file)]
+      (try
+        (let [^FileLock lock (.lock channel)]
+          (try
+            (f)
+            (finally
+              (.release lock))))
+        (finally
+          (.close channel)
+          (.close lock-file))))
+    (finally
+      (.unlock jvm-lock))))
 
 (defn read-sessions
   "Reads all sessions from the state store."
