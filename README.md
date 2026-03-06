@@ -92,31 +92,75 @@ ceeker hook codex notification '{"session_id":"xyz","message":"Testing..."}'
 
 ### Claude Code
 
-Add the following to `.claude/settings.json` (using the 3-level nesting format per the [official spec](https://docs.anthropic.com/en/docs/claude-code/hooks)):
+Add the following to `.claude/settings.json` (using the 3-level nesting format per the [official hooks reference](https://code.claude.com/docs/en/hooks)).
+
+For ceeker's metrics-only use case, command hooks are configured with `"async": true` so they run in the background and do not block the agent loop.
 
 ```json
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "ceeker hook claude SessionStart" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude SessionStart",
+            "async": true
+          }
+        ]
+      }
     ],
     "Notification": [
-      { "hooks": [{ "type": "command", "command": "ceeker hook claude Notification" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude Notification",
+            "async": true
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "hooks": [{ "type": "command", "command": "ceeker hook claude PreToolUse" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude PreToolUse",
+            "async": true
+          }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "hooks": [{ "type": "command", "command": "ceeker hook claude PostToolUse" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude PostToolUse",
+            "async": true
+          }
+        ]
+      }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "ceeker hook claude Stop" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude Stop",
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-Claude Code passes a JSON payload to hook commands via stdin. The payload contains common fields such as `session_id`, `cwd`, and `hook_event_name` (see the [Hooks reference](https://docs.anthropic.com/en/docs/claude-code/hooks)).
+Claude Code passes a JSON payload to command hooks via stdin. The payload contains common fields such as `session_id`, `cwd`, and `hook_event_name` (see the [hooks reference](https://code.claude.com/docs/en/hooks)).
+
+Note: `InstructionsLoaded` is an event that is already asynchronous by design on the Claude Code side.
 
 ### Codex
 

@@ -92,31 +92,75 @@ ceeker hook codex notification '{"session_id":"xyz","message":"Testing..."}'
 
 ### Claude Code
 
-`.claude/settings.json` に以下を追加（[公式仕様](https://docs.anthropic.com/en/docs/claude-code/hooks)準拠の3レベルネスト形式）:
+`.claude/settings.json` に以下を追加してください（[Claude Code hooks 公式リファレンス](https://code.claude.com/docs/en/hooks) 準拠の3レベルネスト形式）。
+
+ceeker をメトリクス送信用途として使う前提で、agent ループをブロックしないよう command hook は `"async": true` を付けて非同期実行にします。
 
 ```json
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "ceeker hook claude SessionStart" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude SessionStart",
+            "async": true
+          }
+        ]
+      }
     ],
     "Notification": [
-      { "hooks": [{ "type": "command", "command": "ceeker hook claude Notification" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude Notification",
+            "async": true
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "hooks": [{ "type": "command", "command": "ceeker hook claude PreToolUse" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude PreToolUse",
+            "async": true
+          }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "hooks": [{ "type": "command", "command": "ceeker hook claude PostToolUse" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude PostToolUse",
+            "async": true
+          }
+        ]
+      }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "ceeker hook claude Stop" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude Stop",
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-Claude Code は hook コマンドの stdin に JSON payload を渡します。payload には `session_id`, `cwd`, `hook_event_name` 等の共通フィールドが含まれます（[Hooks reference](https://docs.anthropic.com/en/docs/claude-code/hooks) 参照）。
+Claude Code は command hook の stdin に JSON payload を渡します。payload には `session_id`, `cwd`, `hook_event_name` などの共通フィールドが含まれます（[hooks リファレンス](https://code.claude.com/docs/en/hooks) 参照）。
+
+補足: `InstructionsLoaded` は Claude Code 側仕様で最初から非同期イベントです。
 
 ### Codex
 
