@@ -6,21 +6,46 @@
             [ceeker.tui.input :as input]
             [ceeker.tui.view :as view]
             [ceeker.tui.watcher :as watcher]
+            [clojure.core.async :as async]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
 
-(def ^:private check-interval
-  "Pane liveness check interval in ticks (~500ms each)."
-  20)
+(def ^:private check-interval-ms
+  "Pane liveness check interval in milliseconds."
+  10000)
 
-(defn- maybe-check-panes!
-  "Runs pane liveness check and state refresh when tick
-   is due. Combines stale detection with capture-pane
-   based intermediate state updates."
-  [tick state-dir]
-  (when (zero? (mod tick check-interval))
+(defn- run-pane-check!
+  "Executes pane liveness check and state refresh.
+   Catches all exceptions so failures never propagate
+   to the caller."
+  [state-dir]
+  (try
     (pane/close-stale-sessions! state-dir)
-    (pane/refresh-session-states! state-dir)))
+    (pane/refresh-session-states! state-dir)
+    (catch Exception e
+      (.println System/err
+                (str "ceeker: pane check failed: "
+                     (.getMessage e))))))
+
+(defn- start-pane-checker!
+  "Starts a background thread that runs pane checks at
+   a fixed interval. Returns a stop channel; close it to
+   stop the checker. Uses async/thread for blocking I/O."
+  ([state-dir] (start-pane-checker!
+                state-dir check-interval-ms))
+  ([state-dir interval-ms]
+   (let [stop-ch (async/chan)]
+     (async/thread
+       (run-pane-check! state-dir)
+       (loop []
+         (let [[_ ch] (async/alts!!
+                       [stop-ch
+                        (async/timeout interval-ms)]
+                       :priority true)]
+           (when-not (= ch stop-ch)
+             (run-pane-check! state-dir)
+             (recur)))))
+     stop-ch)))
 
 (defn- get-session-list
   "Gets session list from state store."
@@ -62,7 +87,8 @@
 
 (defn- tmux-jump!
   "Jumps to the tmux pane for the given session.
-   Prefers pane-id for exact targeting, falls back to cwd search."
+   Prefers pane-id for exact targeting, falls back
+   to cwd search."
   [session]
   (let [pane-id (:pane-id session)
         cwd (:cwd session)]
@@ -113,9 +139,10 @@
 
 (defn- render-screen
   "Renders the screen with sessions and message."
-  [sessions sel filt sm? sb msg terminal-width display-mode]
-  (str (view/render sessions sel terminal-width display-mode
-                    filt sm? sb)
+  [sessions sel filt sm? sb msg terminal-width
+   display-mode]
+  (str (view/render sessions sel terminal-width
+                    display-mode filt sm? sb)
        (when msg (str "\n" msg))))
 
 (defn- handle-enter-key
@@ -190,7 +217,8 @@
   "Processes a key in normal mode."
   [key sel max-idx visible fs display-mode]
   (let [result (or (nav-key-result
-                    key sel max-idx visible fs display-mode)
+                    key sel max-idx visible fs
+                    display-mode)
                    (filter-key-result key fs)
                    {:sel sel :fs fs})]
     (assoc result :dm (get result :dm display-mode))))
@@ -210,7 +238,7 @@
 
 (defn- wait-for-input
   "Waits for key or file change, returns key or nil.
-   Returns nil after a single 500ms poll to allow periodic tasks."
+   Returns nil after 500ms to allow screen refresh."
   [terminal w]
   (or (input/read-key terminal 500)
       (do (when w (watcher/poll-change w 0)) nil)))
@@ -236,39 +264,49 @@
     :else [(get r :sel cl) (:msg r) (:fs r)
            (get r :sm? false) (:sb r) (:dm r)]))
 
+(defn- render-and-read
+  "Renders current state and reads one key event."
+  [terminal w state-dir sel msg fs sm? sb display-mode]
+  (let [sessions (get-session-list state-dir)
+        visible (filtered-sorted sessions fs)
+        mx (max 0 (dec (count visible)))
+        cl (clamp sel 0 mx)
+        width (get-terminal-width terminal)
+        scr (render-screen sessions cl fs sm? sb msg
+                           width display-mode)]
+    (print scr)
+    (flush)
+    {:key (wait-for-input terminal w)
+     :cl cl :visible visible :mx mx}))
+
 (defn- tui-loop
-  "Main TUI render-input loop."
+  "Main TUI render-input loop.
+   Pane checks run in a separate async/thread worker."
   [terminal w state-dir]
   (loop [sel 0 msg nil fs f/empty-filter
-         sm? false sb nil display-mode :auto tick 0]
-    (maybe-check-panes! tick state-dir)
-    (let [sessions (get-session-list state-dir)
-          visible (filtered-sorted sessions fs)
-          mx (max 0 (dec (count visible)))
-          cl (clamp sel 0 mx)
-          width (get-terminal-width terminal)
-          scr (render-screen sessions cl fs sm? sb msg
-                             width display-mode)]
-      (print scr)
-      (flush)
-      (let [r (process-key
-               (wait-for-input terminal w)
-               cl sm? sb visible mx fs display-mode)]
-        (when-let [next-state
-                   (next-loop-state r cl fs sm? sb display-mode)]
-          (let [[nsel nmsg nfs nsm? nsb ndm]
-                next-state]
-            (recur nsel nmsg nfs nsm? nsb ndm (inc tick))))))))
+         sm? false sb nil display-mode :auto]
+    (let [{:keys [key cl visible mx]}
+          (render-and-read terminal w state-dir
+                           sel msg fs sm? sb
+                           display-mode)
+          r (process-key key cl sm? sb visible mx
+                         fs display-mode)]
+      (when-let [ns (next-loop-state r cl fs sm? sb
+                                     display-mode)]
+        (let [[nsel nmsg nfs nsm? nsb ndm] ns]
+          (recur nsel nmsg nfs nsm? nsb ndm))))))
 
 (defn start-tui!
   "Runs the TUI application loop."
   ([] (start-tui! nil))
   ([state-dir]
    (let [terminal (input/create-terminal)
-         w (create-watcher-for state-dir)]
+         w (create-watcher-for state-dir)
+         stop-ch (start-pane-checker! state-dir)]
      (try
        (tui-loop terminal w state-dir)
        (finally
+         (async/close! stop-ch)
          (print "\033[2J\033[H")
          (flush)
          (watcher/close-watcher w)
