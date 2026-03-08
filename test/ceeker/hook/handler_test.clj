@@ -87,7 +87,7 @@
     (is (= "session terminated"
            (:last-message result)))))
 
-;; --- Claude Code: non-updating events omit :last-message ---
+;; --- Claude Code: Stop/SubagentStop use last_assistant_message ---
 
 (deftest test-normalize-claude-stop
   (let [result (handler/normalize-event
@@ -96,12 +96,14 @@
                  :transcript_path "/tmp/transcript.json"
                  :cwd "/tmp/work"
                  :permission_mode "default"
-                 :hook_event_name "Stop"})]
+                 :hook_event_name "Stop"
+                 :last_assistant_message "Refactoring complete."})]
     (is (= "test-456" (:session-id result)))
     (is (= :claude-code (:agent-type result)))
     (is (= :completed (:agent-status result)))
-    (is (not (contains? result :last-message))
-        "Stop should not include :last-message")))
+    (is (= "Refactoring complete."
+           (:last-message result))
+        "Stop should include :last-message from last_assistant_message")))
 
 (deftest test-normalize-claude-pre-tool-use
   (let [result (handler/normalize-event
@@ -184,11 +186,13 @@
                  :transcript_path "/tmp/transcript.json"
                  :cwd "/tmp/work"
                  :permission_mode "default"
-                 :hook_event_name "SubagentStop"})]
+                 :hook_event_name "SubagentStop"
+                 :last_assistant_message "Subtask finished."})]
     (is (= "sub-stop" (:session-id result)))
     (is (= :running (:agent-status result)))
-    (is (not (contains? result :last-message))
-        "SubagentStop should not include :last-message")))
+    (is (= "Subtask finished."
+           (:last-message result))
+        "SubagentStop should include :last-message from last_assistant_message")))
 
 (deftest test-normalize-claude-task-completed
   (let [result (handler/normalize-event
@@ -220,7 +224,7 @@
         (is (= "fallback-1" (:session-id result)))
         (is (= :completed (:agent-status result)))
         (is (not (contains? result :last-message))
-            "Stop via fallback should not include :last-message"))
+            "Stop without last_assistant_message should preserve existing :last-message"))
       (finally
         (cleanup-dir dir)))))
 
@@ -256,6 +260,36 @@
         (is (= "Important update"
                (:last-message session))
             "Store should preserve last-message from Notification"))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-claude-stop-overwrites-last-message-when-present
+  (let [dir (temp-dir)]
+    (try
+      (let [notif-payload
+            (json/generate-string
+             {:session_id "stop-msg-1"
+              :cwd "/tmp/work"
+              :hook_event_name "Notification"
+              :message "Working on it"})]
+        (handler/handle-hook!
+         dir "claude" "Notification" notif-payload))
+      (let [stop-payload
+            (json/generate-string
+             {:session_id "stop-msg-1"
+              :cwd "/tmp/work"
+              :hook_event_name "Stop"
+              :last_assistant_message "Done. Updated 2 files."})
+            result (handler/handle-hook!
+                    dir "claude" "Stop" stop-payload)
+            stored (store/read-sessions dir)
+            session (get-in stored [:sessions "stop-msg-1"])]
+        (is (= :completed (:agent-status result)))
+        (is (= "Done. Updated 2 files."
+               (:last-message result)))
+        (is (= "Done. Updated 2 files."
+               (:last-message session))
+            "Store should keep the final assistant response from Stop"))
       (finally
         (cleanup-dir dir)))))
 
