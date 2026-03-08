@@ -81,6 +81,7 @@ ceeker
 ```bash
 # Claude Code hookイベントを処理（stdin で JSON payload を受け取る）
 ceeker hook claude Notification <<< '{"session_id":"abc","cwd":"/tmp","hook_event_name":"Notification","title":"Working..."}'
+ceeker hook claude Stop <<< '{"session_id":"abc","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"Done. Updated 2 files."}'
 
 # Codex notify hookイベントを処理（Codex が JSON を最後の引数として渡す）
 ceeker hook codex '{"type":"agent-turn-complete","thread-id":"xyz","cwd":"/tmp","last-assistant-message":"Done."}'
@@ -153,12 +154,23 @@ ceeker をメトリクス送信用途として使う前提で、agent ループ�
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude SubagentStop",
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-Claude Code は command hook の stdin に JSON payload を渡します。payload には `session_id`, `cwd`, `hook_event_name` などの共通フィールドが含まれます（[hooks リファレンス](https://code.claude.com/docs/en/hooks) 参照）。
+Claude Code は command hook の stdin に JSON payload を渡します。payload には `session_id`, `cwd`, `hook_event_name` などの共通フィールドが含まれます（[hooks リファレンス](https://code.claude.com/docs/en/hooks) 参照）。`Stop` / `SubagentStop` では `last_assistant_message` も取り込み、ceeker の `last-message` として表示します。
 
 補足: `InstructionsLoaded` は Claude Code 側仕様で最初から非同期イベントです。
 

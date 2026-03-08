@@ -81,6 +81,7 @@ Displays a list of all active sessions.
 ```bash
 # Process Claude Code hook events (receives JSON payload via stdin)
 ceeker hook claude Notification <<< '{"session_id":"abc","cwd":"/tmp","hook_event_name":"Notification","title":"Working..."}'
+ceeker hook claude Stop <<< '{"session_id":"abc","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"Done. Updated 2 files."}'
 
 # Process Codex notify hook events (Codex passes JSON as the last argument)
 ceeker hook codex '{"type":"agent-turn-complete","thread-id":"xyz","cwd":"/tmp","last-assistant-message":"Done."}'
@@ -153,12 +154,23 @@ For ceeker's metrics-only use case, command hooks are configured with `"async": 
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook claude SubagentStop",
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-Claude Code passes a JSON payload to command hooks via stdin. The payload contains common fields such as `session_id`, `cwd`, and `hook_event_name` (see the [hooks reference](https://code.claude.com/docs/en/hooks)).
+Claude Code passes a JSON payload to command hooks via stdin. The payload contains common fields such as `session_id`, `cwd`, and `hook_event_name` (see the [hooks reference](https://code.claude.com/docs/en/hooks)). For `Stop` and `SubagentStop`, ceeker also captures `last_assistant_message` and shows it as the session's `last-message`.
 
 Note: `InstructionsLoaded` is an event that is already asynchronous by design on the Claude Code side.
 

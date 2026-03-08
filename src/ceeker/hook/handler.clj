@@ -45,10 +45,15 @@
                    (str (java.util.UUID/randomUUID)))
    :cwd (or (:cwd payload) "")})
 
+(defn- claude-last-assistant-message
+  "Returns Claude's final assistant message when present in the hook payload."
+  [payload]
+  (:last_assistant_message payload))
+
 (defn- claude-event-fields
   "Returns [status message] for a Claude event type.
-   Only Notification and SessionEnd update last-message.
-   All other events return nil message to preserve the
+   Notification, SessionEnd, Stop, and SubagentStop can update
+   last-message. All other events return nil message to preserve the
    existing last-message in the store."
   [event-type payload]
   (case event-type
@@ -58,9 +63,11 @@
                         "notification")]
     "SessionEnd" [:completed "session terminated"]
     "SessionStart" [:running nil]
-    "Stop" [:completed nil]
+    "Stop" [:completed
+            (claude-last-assistant-message payload)]
     "SubagentStart" [:running nil]
-    "SubagentStop" [:running nil]
+    "SubagentStop" [:running
+                    (claude-last-assistant-message payload)]
     "PreToolUse" [:running nil]
     "PostToolUse" [:running nil]
     "PostToolUseFailure" [:running nil]
