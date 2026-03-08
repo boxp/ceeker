@@ -2,6 +2,7 @@
   "Entry point for ceeker CLI."
   (:require [ceeker.hook.handler :as hook]
             [ceeker.tui.app :as tui]
+            [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.cli :as cli])
@@ -101,19 +102,13 @@
 
 (defmacro ^:private run [expr]
   (if musl?
-    `(let [v# (volatile! nil)
-           ex# (volatile! nil)
-           f# (fn []
-                (try
-                  (vreset! v# ~expr)
-                  (catch Throwable t#
-                    (vreset! ex# t#))))]
-       (doto (Thread. nil f# "ceeker-main")
-         (.start)
-         (.join))
-       (when-let [t# @ex#]
+    `(let [r# (async/<!!
+               (async/thread
+                 (try [nil ~expr]
+                      (catch Throwable t# [t# nil]))))]
+       (when-let [t# (first r#)]
          (throw t#))
-       @v#)
+       (second r#))
     `(do ~expr)))
 
 (defn -main
