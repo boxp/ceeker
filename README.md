@@ -2,9 +2,18 @@
 
 > [日本語版 (Japanese)](./README.ja.md)
 
-A TUI for monitoring AI coding agent sessions and progress.
+A TUI for monitoring AI coding agent sessions and progress across tmux panes.
 
 In environments where multiple AI coding agents (Claude Code / Codex) run in parallel, ceeker provides a unified view of all sessions with the ability to jump to individual tmux panes.
+
+![ceeker screenshot](./assets/ceeker-screenshot.png)
+
+## Why ceeker?
+
+- **Works on Windows (WSL), Linux, and macOS**
+- **Supports both Claude Code and Codex**
+- **Jump to the target Claude Code / Codex pane just by pressing `Enter`**
+- **Monitor multiple agent sessions in one place**
 
 ## Prerequisites
 
@@ -76,7 +85,16 @@ Displays a list of all active sessions.
 | `c` | Clear all filters |
 | `q` | Quit |
 
-### Hook CLI
+## Handy tmux configuration
+
+You can open ceeker as a popup from anywhere inside tmux.
+
+```tmux
+# Show a popup with all Claude Code / Codex states via prefix + C-k
+bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker"
+```
+
+## Hook CLI
 
 ```bash
 # Process Claude Code hook events (receives JSON payload via stdin)
