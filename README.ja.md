@@ -6,6 +6,15 @@ AI Coding Agent セッション・進捗モニタリングTUI。
 
 複数のAIコーディングエージェント（Claude Code / Codex）が並行動作する環境で、各セッションの状態を一覧表示し、tmuxペインへのジャンプを可能にする。
 
+![ceeker screenshot](./assets/ceeker-screenshot.png)
+
+## ceekerの特徴
+
+- **Windows（WSL）、Linux、macOSで利用可能**なバイナリを提供し、普段使いの端末に合わせて導入できる
+- **Claude Code / Codex 両方に対応**し、どちらのエージェントも同じ画面でまとめてモニタリング可能
+- **Enterキーを押すだけで対象の Claude Code / Codex ペインにジャンプ**し、素早く作業へ戻れる
+- **複数セッションを一括監視**し、Auto / Table / Card 表示で稼働状況や最新メッセージを把握できる
+
 ## 前提条件
 
 - tmux
@@ -75,6 +84,15 @@ ceeker
 | `/` | テキスト検索（session-id / cwd 部分一致） |
 | `c` | フィルタ全クリア |
 | `q` | 終了 |
+
+## tmux の便利設定
+
+tmux 内からどこからでも ceeker をポップアップ表示できる設定例です。
+
+```tmux
+# prefix + C-k で全ての Claude Code / Codex の状態をポップアップとして表示
+bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker"
+```
 
 ### Hook CLI
 
