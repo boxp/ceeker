@@ -94,20 +94,9 @@ You can open ceeker as a popup from anywhere inside tmux.
 bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker"
 ```
 
-## Hook CLI
+## Setup (Required)
 
-```bash
-# Process Claude Code hook events (receives JSON payload via stdin)
-ceeker hook claude Notification <<< '{"session_id":"abc","cwd":"/tmp","hook_event_name":"Notification","title":"Working..."}'
-ceeker hook claude Stop <<< '{"session_id":"abc","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"Done. Updated 2 files."}'
-
-# Process Codex notify hook events (Codex passes JSON as the last argument)
-ceeker hook codex '{"type":"agent-turn-complete","thread-id":"xyz","cwd":"/tmp","last-assistant-message":"Done."}'
-# Legacy format is also supported
-ceeker hook codex notification '{"session_id":"xyz","message":"Testing..."}'
-```
-
-## Hook Configuration
+After installation, you **must** configure hooks so that ceeker can receive session events from your AI coding agents.
 
 ### Claude Code
 

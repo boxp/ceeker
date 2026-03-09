@@ -94,20 +94,9 @@ tmux 内のどこからでもポップアップで ceeker を開けます。
 bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker"
 ```
 
-## Hook CLI
+## セットアップ（必須）
 
-```bash
-# Claude Code hookイベントを処理（stdin で JSON payload を受け取る）
-ceeker hook claude Notification <<< '{"session_id":"abc","cwd":"/tmp","hook_event_name":"Notification","title":"Working..."}'
-ceeker hook claude Stop <<< '{"session_id":"abc","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"Done. Updated 2 files."}'
-
-# Codex notify hookイベントを処理（Codex が JSON を最後の引数として渡す）
-ceeker hook codex '{"type":"agent-turn-complete","thread-id":"xyz","cwd":"/tmp","last-assistant-message":"Done."}'
-# レガシー形式も引き続きサポート
-ceeker hook codex notification '{"session_id":"xyz","message":"Testing..."}'
-```
-
-## Hook設定
+インストール後、AIコーディングエージェントからセッションイベントを受信するために hook の設定が**必要**です。
 
 ### Claude Code
 
