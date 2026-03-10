@@ -61,7 +61,8 @@
 (deftest test-nav-key-q-returns-quit
   (testing "q key returns explicit quit signal"
     (let [result (#'ceeker.tui.app/nav-key-result
-                  \q 0 5 [] f/empty-filter :auto)]
+                  \q 0 5 [] f/empty-filter :auto
+                  false)]
       (is (true? (:quit result))))))
 
 (deftest test-next-loop-state-quit
@@ -82,7 +83,8 @@
 (deftest test-handle-normal-key-q-propagates-quit
   (testing "handle-normal-key propagates quit"
     (let [result (#'ceeker.tui.app/handle-normal-key
-                  \q 0 5 [] f/empty-filter :auto)]
+                  \q 0 5 [] f/empty-filter :auto
+                  false)]
       (is (true? (:quit result)))
       (is (nil? (#'ceeker.tui.app/next-loop-state
                  result 0 f/empty-filter
@@ -92,14 +94,14 @@
   (testing "process-key returns quit when q pressed"
     (let [result (#'ceeker.tui.app/process-key
                   \q 0 false nil [] 0
-                  f/empty-filter :auto)]
+                  f/empty-filter :auto false)]
       (is (true? (:quit result))))))
 
 (deftest test-process-key-q-in-search-mode
   (testing "q in search mode adds to buffer"
     (let [result (#'ceeker.tui.app/process-key
                   \q 0 true "" [] 0
-                  f/empty-filter :auto)]
+                  f/empty-filter :auto false)]
       (is (not (:quit result)))
       (is (true? (:sm? result))))))
 
@@ -328,3 +330,80 @@
             (Thread/sleep 500)
             (is (= count-at-stop @call-count)
                 "no more checks after stop")))))))
+
+;; --- exit-on-jump tests ---
+
+(deftest test-handle-enter-key-returns-jumped-true
+  (testing "handle-enter-key returns :jumped true on success"
+    (with-redefs [ceeker.tui.app/tmux-jump!
+                  (fn [_] {:success true :target "%1"})]
+      (let [sessions [{:session-id "s1"
+                       :pane-id "%1"
+                       :agent-type :claude-code
+                       :agent-status :running}]
+            result (#'ceeker.tui.app/handle-enter-key
+                    sessions 0)]
+        (is (true? (:jumped result)))
+        (is (string? (:msg result)))))))
+
+(deftest test-handle-enter-key-returns-jumped-false-on-fail
+  (testing "handle-enter-key returns :jumped false on failure"
+    (with-redefs [ceeker.tui.app/tmux-jump!
+                  (fn [_] {:success false
+                           :error "no pane"})]
+      (let [sessions [{:session-id "s1"
+                       :pane-id "%1"
+                       :agent-type :claude-code
+                       :agent-status :running}]
+            result (#'ceeker.tui.app/handle-enter-key
+                    sessions 0)]
+        (is (false? (:jumped result)))
+        (is (string? (:msg result)))))))
+
+(deftest test-handle-enter-key-empty-sessions
+  (testing "handle-enter-key returns :jumped false for empty"
+    (let [result (#'ceeker.tui.app/handle-enter-key [] 0)]
+      (is (false? (:jumped result)))
+      (is (string? (:msg result))))))
+
+(deftest test-exit-on-jump-quits-after-successful-jump
+  (testing "exit-on-jump causes quit on successful jump"
+    (with-redefs [ceeker.tui.app/tmux-jump!
+                  (fn [_] {:success true :target "%1"})]
+      (let [sessions [{:session-id "s1"
+                       :pane-id "%1"
+                       :agent-type :claude-code
+                       :agent-status :running}]
+            result (#'ceeker.tui.app/nav-key-result
+                    :enter 0 0 sessions f/empty-filter
+                    :auto true)]
+        (is (true? (:quit result)))))))
+
+(deftest test-exit-on-jump-false-does-not-quit
+  (testing "without exit-on-jump, jump does not quit"
+    (with-redefs [ceeker.tui.app/tmux-jump!
+                  (fn [_] {:success true :target "%1"})]
+      (let [sessions [{:session-id "s1"
+                       :pane-id "%1"
+                       :agent-type :claude-code
+                       :agent-status :running}]
+            result (#'ceeker.tui.app/nav-key-result
+                    :enter 0 0 sessions f/empty-filter
+                    :auto false)]
+        (is (not (:quit result)))
+        (is (string? (:msg result)))))))
+
+(deftest test-exit-on-jump-no-quit-on-failed-jump
+  (testing "exit-on-jump does not quit when jump fails"
+    (with-redefs [ceeker.tui.app/tmux-jump!
+                  (fn [_] {:success false
+                           :error "no pane"})]
+      (let [sessions [{:session-id "s1"
+                       :pane-id "%1"
+                       :agent-type :claude-code
+                       :agent-status :running}]
+            result (#'ceeker.tui.app/nav-key-result
+                    :enter 0 0 sessions f/empty-filter
+                    :auto true)]
+        (is (not (:quit result)))
+        (is (string? (:msg result)))))))

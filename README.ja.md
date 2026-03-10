@@ -85,13 +85,21 @@ ceeker
 | `c` | フィルタ全クリア |
 | `q` | 終了 |
 
+### ジャンプ後に自動終了
+
+`--exit-on-jump` を指定すると、ジャンプ成功後に ceeker が自動的に終了します。ポップアップで一時的に起動し、セッション選択→ジャンプ→自動クローズする運用に便利です。
+
+```bash
+ceeker --exit-on-jump
+```
+
 ## 便利な tmux 設定
 
-tmux 内のどこからでもポップアップで ceeker を開けます。
+tmux 内のどこからでもポップアップで ceeker を開けます。`--exit-on-jump` と組み合わせると、ペイン選択後にポップアップが自動で閉じます。
 
 ```tmux
 # prefix + C-k で Claude Code / Codex の状態をポップアップ表示
-bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker"
+bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker --exit-on-jump"
 ```
 
 ## セットアップ（必須）
