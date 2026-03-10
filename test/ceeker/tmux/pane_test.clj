@@ -296,7 +296,7 @@
                   ceeker.tmux.pane/process-alive?
                   (fn [_] false)]
       (is (= :not-found (pane/find-agent-in-tree
-                          "999999" :claude-code))))))
+                         "999999" :claude-code))))))
 
 (deftest test-find-agent-unreadable-process-returns-unknown
   (testing "Live process with unreadable cmdline still
@@ -306,7 +306,7 @@
                   ceeker.tmux.pane/process-alive?
                   (fn [_] true)]
       (is (= :unknown (pane/find-agent-in-tree
-                        "999999" :claude-code))))))
+                       "999999" :claude-code))))))
 
 ;; --- stale-session per-pane dedup tests (F) ---
 
