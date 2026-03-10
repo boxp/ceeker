@@ -268,11 +268,16 @@
 (defn- capture-state-for-closed-session
   "Detects state for a closed (non-superseded) session.
    Returns updated session data only when the agent is
-   actively running or waiting, not merely idle."
-  [session]
+   actively running or waiting, not merely idle.
+   Requires process-tree confirmation that the agent is
+   actually alive, preventing false reactivation from
+   stale terminal output left after agent exit."
+  [session pane-infos]
   (when (and (= :closed (:agent-status session))
              (not (:superseded session))
-             (seq (:pane-id session)))
+             (seq (:pane-id session))
+             (= :alive (session-has-live-agent?
+                        session pane-infos)))
     (when-let [detected (capture/detect-agent-state
                          (:pane-id session)
                          (:agent-type session))]
@@ -287,7 +292,8 @@
    Processes sessions in :running, :idle, and :waiting
    so intermediate transitions are continuously tracked.
    Also checks closed (non-superseded) sessions for agent
-   reactivation in their pane.
+   reactivation in their pane, but only after confirming
+   the agent process is alive in the process tree.
    Uses update-session-if-active! to atomically verify
    the session is still active before writing, preventing
    overwrite of newer hook-driven state transitions."
@@ -296,7 +302,8 @@
    (let [state (if state-dir
                  (store/read-sessions state-dir)
                  (store/read-sessions))
-         sessions (:sessions state)]
+         sessions (:sessions state)
+         pane-infos (or (list-pane-info) [])]
      (doseq [[sid session] sessions]
        (if-let [update-data
                 (capture-state-for-session session)]
@@ -307,7 +314,7 @@
             sid update-data))
          (when-let [reactivate-data
                     (capture-state-for-closed-session
-                     session)]
+                     session pane-infos)]
            (if state-dir
              (store/reactivate-closed-session!
               state-dir sid reactivate-data)
