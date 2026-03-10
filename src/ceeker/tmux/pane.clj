@@ -212,11 +212,19 @@
   "Session statuses eligible for capture-pane refresh."
   #{:running :idle :waiting})
 
+(defn- run-stale-cleanup!
+  "Runs stale-close, dedup, and purge for the given dir."
+  [dir pane-cwds pane-ids pane-infos]
+  (store/close-sessions-by-pred!
+   dir
+   (fn [_sid session]
+     (stale-session? session pane-cwds pane-infos)))
+  (store/close-dup-pane-sessions! dir)
+  (store/purge-expired-closed-sessions! dir pane-ids))
+
 (defn close-stale-sessions!
   "Checks running sessions and marks stale ones as closed.
-   Closes duplicate sessions sharing a pane-id (keeps
-   newest) and sessions whose agent process is dead.
-   Also purges expired closed sessions whose pane is gone.
+   Also deduplicates and purges expired sessions.
    Does nothing if tmux is unavailable (nil)."
   ([] (close-stale-sessions! nil))
   ([state-dir]
@@ -225,22 +233,11 @@
        (let [pane-cwds (into #{} (map :cwd) pane-infos)
              pane-ids (into #{} (map :pane-id) pane-infos)]
          (if state-dir
-           (do (store/close-sessions-by-pred!
-                state-dir
-                (fn [_sid session]
-                  (stale-session?
-                   session pane-cwds pane-infos)))
-               (store/close-dup-pane-sessions!
-                state-dir)
-               (store/purge-expired-closed-sessions!
-                state-dir pane-ids))
-           (do (store/close-sessions-by-pred!
-                (fn [_sid session]
-                  (stale-session?
-                   session pane-cwds pane-infos)))
-               (store/close-dup-pane-sessions!)
-               (store/purge-expired-closed-sessions!
-                pane-ids))))))))
+           (run-stale-cleanup!
+            state-dir pane-cwds pane-ids pane-infos)
+           (run-stale-cleanup!
+            (store/state-dir)
+            pane-cwds pane-ids pane-infos)))))))
 
 (def ^:private debounce-ms
   "Minimum time (ms) since last hook update before

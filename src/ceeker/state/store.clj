@@ -449,6 +449,23 @@
             path
             (assoc state :sessions updated))))))))
 
+(defn- session-epoch-ms
+  "Parses :last-updated to epoch millis for sorting.
+   Returns 0 on parse failure."
+  [[_sid s]]
+  (try
+    (.toEpochMilli
+     (java.time.Instant/parse (:last-updated s)))
+    (catch Exception _ 0)))
+
+(defn- older-dup-sids
+  "Given entries sharing a pane-id, returns sids of all
+   but the newest (by last-updated)."
+  [entries]
+  (when (> (count entries) 1)
+    (let [sorted (sort-by session-epoch-ms entries)]
+      (map first (butlast sorted)))))
+
 (defn- duplicate-pane-sids
   "Returns session-ids of older duplicates: active sessions
    sharing a pane-id with a newer active session."
@@ -461,20 +478,17 @@
                 sessions)
         by-pane (group-by (fn [[_sid s]] (:pane-id s))
                           active)]
-    (into #{}
-          (mapcat
-           (fn [entries]
-             (when (> (count entries) 1)
-               (let [sorted (sort-by
-                             (fn [[_sid s]]
-                               (try
-                                 (.toEpochMilli
-                                  (java.time.Instant/parse
-                                   (:last-updated s)))
-                                 (catch Exception _ 0)))
-                             entries)]
-                 (map first (butlast sorted))))))
-          (vals by-pane))))
+    (into #{} (mapcat older-dup-sids) (vals by-pane))))
+
+(defn- close-sessions-by-ids
+  "Merges close-data into sessions matching the given sids."
+  [sessions sids close-data]
+  (reduce
+   (fn [m sid]
+     (if (contains? m sid)
+       (assoc m sid (merge (get m sid) close-data))
+       m))
+   sessions sids))
 
 (defn close-dup-pane-sessions!
   "Atomically closes older active sessions that share a
@@ -497,12 +511,7 @@
              (write-state-file!
               path
               (assoc state :sessions
-                     (reduce
-                      (fn [m sid]
-                        (if (contains? m sid)
-                          (assoc m sid
-                                 (merge (get m sid)
-                                        close-data))
-                          m))
+                     (close-sessions-by-ids
                       (:sessions state)
-                      dup-sids))))))))))
+                      dup-sids
+                      close-data))))))))))
