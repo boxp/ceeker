@@ -157,8 +157,8 @@
                  {:last-updated nil})))))
 
 (deftest test-find-agent-in-tree-nonexistent-pid
-  (is (= :unknown (pane/find-agent-in-tree
-                   "999999999" :claude-code))))
+  (is (= :not-found (pane/find-agent-in-tree
+                      "999999999" :claude-code))))
 
 (deftest test-find-agent-in-tree-current-process
   (let [pid (str (.pid (java.lang.ProcessHandle/current)))]
@@ -250,6 +250,133 @@
                     pane/find-agent-in-tree
                     (fn [_ _] :found)]
         (is (nil? (capture-fn session pane-infos)))))))
+
+;; --- session-has-live-agent? unit tests (D) ---
+
+(deftest test-session-has-live-agent-dead-process
+  (testing "Returns :dead when pane process tree has no agent"
+    (let [session {:pane-id "%5" :cwd "/tmp/work"
+                   :agent-type :claude-code}
+          pane-infos [{:pane-id "%5" :pid "12345"
+                       :cwd "/tmp/work"}]
+          has-live? #'ceeker.tmux.pane/session-has-live-agent?]
+      (with-redefs [pane/find-agent-in-tree
+                    (fn [_ _] :not-found)]
+        (is (= :dead (has-live? session pane-infos)))))))
+
+(deftest test-session-has-live-agent-alive
+  (testing "Returns :alive when agent found in process tree"
+    (let [session {:pane-id "%5" :cwd "/tmp/work"
+                   :agent-type :claude-code}
+          pane-infos [{:pane-id "%5" :pid "12345"
+                       :cwd "/tmp/work"}]
+          has-live? #'ceeker.tmux.pane/session-has-live-agent?]
+      (with-redefs [pane/find-agent-in-tree
+                    (fn [_ _] :found)]
+        (is (= :alive (has-live? session pane-infos)))))))
+
+(deftest test-session-has-live-agent-no-matching-pane
+  (testing "Returns :dead when pane-id not in pane-infos"
+    (let [session {:pane-id "%5" :cwd "/tmp/work"
+                   :agent-type :claude-code}
+          pane-infos [{:pane-id "%99" :pid "12345"
+                       :cwd "/tmp/other"}]
+          has-live? #'ceeker.tmux.pane/session-has-live-agent?]
+      (with-redefs [pane/find-agent-in-tree
+                    (fn [_ _] :found)]
+        (is (= :dead (has-live? session pane-infos)))))))
+
+;; --- find-agent-in-tree dead process detection (E) ---
+
+(deftest test-find-agent-dead-process-returns-not-found
+  (testing "Dead process (nil cmdline + not alive) returns
+            :not-found instead of :unknown"
+    (with-redefs [ceeker.tmux.pane/read-proc-cmdline
+                  (fn [_] nil)
+                  ceeker.tmux.pane/process-alive?
+                  (fn [_] false)]
+      (is (= :not-found (pane/find-agent-in-tree
+                          "999999" :claude-code))))))
+
+(deftest test-find-agent-unreadable-process-returns-unknown
+  (testing "Live process with unreadable cmdline still
+            returns :unknown"
+    (with-redefs [ceeker.tmux.pane/read-proc-cmdline
+                  (fn [_] nil)
+                  ceeker.tmux.pane/process-alive?
+                  (fn [_] true)]
+      (is (= :unknown (pane/find-agent-in-tree
+                        "999999" :claude-code))))))
+
+;; --- stale-session per-pane dedup tests (F) ---
+
+(deftest test-stale-closes-older-duplicate-pane-session
+  (testing "When two active sessions share a pane-id with
+            different agent types, the older one is closed
+            by dedup even when agent is alive.
+            (Supersede only handles same agent-type, so this
+            tests the dedup path.)"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "old"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work-a"
+          :pane-id "%5"
+          :last-updated (.toString
+                         (.minusSeconds
+                          (java.time.Instant/now) 30))})
+        (store/update-session!
+         dir "new"
+         {:agent-type :codex
+          :agent-status :running
+          :cwd "/tmp/work-b"
+          :pane-id "%5"
+          :last-updated (.toString
+                         (java.time.Instant/now))})
+        (with-redefs [pane/list-pane-info
+                      (fn [] [{:pane-id "%5"
+                               :pid "12345"
+                               :cwd "/tmp/work-b"}])
+                      pane/find-agent-in-tree
+                      (fn [_ _] :found)]
+          (pane/close-stale-sessions! dir))
+        (let [state (store/read-sessions dir)
+              old (get-in state [:sessions "old"])
+              new-s (get-in state [:sessions "new"])]
+          (is (= :closed (:agent-status old))
+              "Older session sharing pane must be closed")
+          (is (= :running (:agent-status new-s))
+              "Newest session in pane stays running"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-stale-keeps-sole-live-session
+  (testing "Single active session with live agent not closed"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%5"
+          :last-updated (.toString
+                         (java.time.Instant/now))})
+        (with-redefs [pane/list-pane-info
+                      (fn [] [{:pane-id "%5"
+                               :pid "12345"
+                               :cwd "/tmp/work"}])
+                      pane/find-agent-in-tree
+                      (fn [_ _] :found)]
+          (pane/close-stale-sessions! dir))
+        (let [s1 (get-in (store/read-sessions dir)
+                         [:sessions "s1"])]
+          (is (= :running (:agent-status s1))
+              "Sole session with live agent stays running"))
+        (finally
+          (cleanup-dir dir))))))
 
 ;; --- New tests for stale session / pane reuse fixes ---
 

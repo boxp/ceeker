@@ -146,9 +146,16 @@
     (when (seq pane-id)
       [pane-id (:agent-type session)])))
 
+(def ^:private capturable-statuses
+  "Session statuses eligible for capture-based updates
+   and supersede targeting."
+  #{:running :idle :waiting})
+
 (defn- supersede-old-sessions
-  "Closes running sessions that share the same supersede key
-   as the new session, excluding the new session itself."
+  "Closes active sessions that share the same supersede key
+   as the new session, excluding the new session itself.
+   Targets running, idle, and waiting sessions so that
+   capture-transitioned sessions are also superseded."
   [sessions session-id session-data now]
   (if-let [key (supersede-key session-data)]
     (let [supersede-data {:agent-status :closed
@@ -157,7 +164,8 @@
       (reduce-kv
        (fn [m sid session]
          (if (and (not= sid session-id)
-                  (= :running (:agent-status session))
+                  (contains? capturable-statuses
+                             (:agent-status session))
                   (= key (supersede-key session)))
            (assoc m sid (merge session supersede-data))
            m))
@@ -222,10 +230,6 @@
             (assoc state :sessions
                    (assoc sessions
                           session-id updated)))))))))
-
-(def ^:private capturable-statuses
-  "Session statuses eligible for capture-based updates."
-  #{:running :idle :waiting})
 
 (defn update-session-if-active!
   "Atomically updates a session only if its current
@@ -444,3 +448,61 @@
            (write-state-file!
             path
             (assoc state :sessions updated))))))))
+
+(defn- duplicate-pane-sids
+  "Returns session-ids of older duplicates: active sessions
+   sharing a pane-id with a newer active session."
+  [sessions]
+  (let [active (filter
+                (fn [[_sid s]]
+                  (and (contains? capturable-statuses
+                                  (:agent-status s))
+                       (seq (:pane-id s))))
+                sessions)
+        by-pane (group-by (fn [[_sid s]] (:pane-id s))
+                          active)]
+    (into #{}
+          (mapcat
+           (fn [entries]
+             (when (> (count entries) 1)
+               (let [sorted (sort-by
+                             (fn [[_sid s]]
+                               (try
+                                 (.toEpochMilli
+                                  (java.time.Instant/parse
+                                   (:last-updated s)))
+                                 (catch Exception _ 0)))
+                             entries)]
+                 (map first (butlast sorted))))))
+          (vals by-pane))))
+
+(defn close-dup-pane-sessions!
+  "Atomically closes older active sessions that share a
+   pane-id with a newer active session. Runs dedup under
+   the file lock to avoid TOCTOU races."
+  ([] (close-dup-pane-sessions! (state-dir)))
+  ([dir]
+   (ensure-state-dir! dir)
+   (let [path (state-file-path dir)
+         now (.toString (java.time.Instant/now))]
+     (with-file-lock dir
+       (fn []
+         (let [state (read-state-file path)
+               dup-sids (duplicate-pane-sids
+                         (:sessions state))
+               close-data {:agent-status :closed
+                           :superseded true
+                           :last-updated now}]
+           (when (seq dup-sids)
+             (write-state-file!
+              path
+              (assoc state :sessions
+                     (reduce
+                      (fn [m sid]
+                        (if (contains? m sid)
+                          (assoc m sid
+                                 (merge (get m sid)
+                                        close-data))
+                          m))
+                      (:sessions state)
+                      dup-sids))))))))))
