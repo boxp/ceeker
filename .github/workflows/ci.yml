@@ -12,6 +12,7 @@ on:
       - 'build.clj'
       - '.clj-kondo/**'
       - '.github/workflows/ci.yml'
+      - 'renovate.json5'
   pull_request:
     branches: [main]
     paths:
@@ -23,6 +24,7 @@ on:
       - 'build.clj'
       - '.clj-kondo/**'
       - '.github/workflows/ci.yml'
+      - 'renovate.json5'
 
 jobs:
   lint:

@@ -1,0 +1,41 @@
+---
+name: pull_request_target
+on: pull_request_target
+
+concurrency:
+  group: ${{ github.workflow }}--${{ github.head_ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  renovate-config-validator:
+    uses: ./.github/workflows/wc-renovate-config-validator.yaml
+    with:
+      ref: ${{github.event.pull_request.head.sha}}
+    permissions:
+      contents: read
+
+  # This job is used for branch protection rule
+  # Add this job to `Status checks that are required`
+  status-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - renovate-config-validator
+    if: failure()
+    steps:
+      - run: exit 1
+
+  enable-auto-merge:
+    # This job is used for main branch's branch protection rule's status check.
+    # If all dependent jobs succeed or are skipped this job succeeds.
+    uses: ./.github/workflows/wc-enable-auto-merge.yaml
+    needs:
+      - status-check
+    permissions: {}
+    secrets:
+      gh_app_id: ${{secrets.APP_ID}}
+      gh_app_private_key: ${{secrets.APP_PRIVATE_KEY}}
+    if: |
+      ! failure() && ! cancelled() && github.event.pull_request.user.login == 'renovate[bot]' && contains(github.event.pull_request.body, ' **Automerge**: Enabled.')
