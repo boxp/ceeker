@@ -158,7 +158,7 @@
 
 (deftest test-find-agent-in-tree-nonexistent-pid
   (is (= :not-found (pane/find-agent-in-tree
-                      "999999999" :claude-code))))
+                     "999999999" :claude-code))))
 
 (deftest test-find-agent-in-tree-current-process
   (let [pid (str (.pid (java.lang.ProcessHandle/current)))]
