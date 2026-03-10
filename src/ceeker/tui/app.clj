@@ -184,6 +184,15 @@
     :else
     {:sm? true :sb search-buf :fs filter-state}))
 
+(defn- enter-key-result
+  "Handles Enter key: jump and optionally quit."
+  [sel visible fs exit-on-jump?]
+  (let [{:keys [msg jumped]} (handle-enter-key
+                              visible sel)]
+    (if (and jumped exit-on-jump?)
+      {:quit true}
+      {:sel sel :fs fs :msg msg})))
+
 (defn- nav-key-result
   "Handles navigation and action keys."
   [key sel max-idx visible fs display-mode exit-on-jump?]
@@ -194,11 +203,7 @@
     (or (= key :down) (= key \j))
     {:sel (min max-idx (inc sel)) :fs fs}
     (= key :enter)
-    (let [{:keys [msg jumped]} (handle-enter-key
-                                visible sel)]
-      (if (and jumped exit-on-jump?)
-        {:quit true}
-        {:sel sel :fs fs :msg msg}))
+    (enter-key-result sel visible fs exit-on-jump?)
     (= key \r)
     {:sel sel :fs fs
      :msg (view/render-message "Refreshed")}
