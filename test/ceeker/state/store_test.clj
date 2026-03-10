@@ -257,28 +257,32 @@
       (finally
         (cleanup-dir dir)))))
 
-(deftest test-supersede-different-cwd-no-close
-  (let [dir (temp-dir)]
-    (try
-      (store/update-session!
-       dir "s1"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work-a"
-        :pane-id "%42"})
-      (store/update-session!
-       dir "s2"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work-b"
-        :pane-id "%42"})
-      (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])
-            s2 (get-in state [:sessions "s2"])]
-        (is (= :running (:agent-status s1)))
-        (is (= :running (:agent-status s2))))
-      (finally
-        (cleanup-dir dir)))))
+(deftest test-supersede-different-cwd-closes-old
+  (testing "Same pane + same agent type supersedes even with different CWD"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work-a"
+          :pane-id "%42"})
+        (store/update-session!
+         dir "s2"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work-b"
+          :pane-id "%42"})
+        (let [state (store/read-sessions dir)
+              s1 (get-in state [:sessions "s1"])
+              s2 (get-in state [:sessions "s2"])]
+          (is (= :closed (:agent-status s1))
+              "Old session must be closed when same pane is reused")
+          (is (true? (:superseded s1))
+              "Old session must be marked as superseded")
+          (is (= :running (:agent-status s2))))
+        (finally
+          (cleanup-dir dir))))))
 
 (deftest test-supersede-different-agent-no-close
   (let [dir (temp-dir)]

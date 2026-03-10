@@ -137,11 +137,14 @@
 
 (defn- supersede-key
   "Returns the supersede key for a session, or nil if
-   pane-id is empty (supersede disabled)."
+   pane-id is empty (supersede disabled).
+   Uses [pane-id agent-type] only — CWD is excluded so that
+   a new session in the same pane supersedes the old one even
+   when the working directory has changed."
   [session]
   (let [pane-id (:pane-id session)]
     (when (seq pane-id)
-      [pane-id (:agent-type session) (:cwd session)])))
+      [pane-id (:agent-type session)])))
 
 (defn- supersede-old-sessions
   "Closes running sessions that share the same supersede key

@@ -166,6 +166,14 @@
                        pid :claude-code)))))
 
 ;; --- capture-state-for-closed-session reactivation tests ---
+;; Note: capture-state-for-closed-session now takes [session pane-infos]
+;; and requires the agent to be alive in the process tree before
+;; reactivating from terminal capture.
+
+(defn- make-pane-infos
+  "Creates pane-infos matching a session's pane-id."
+  [pane-id pid]
+  [{:pane-id pane-id :pid pid :cwd "/tmp/work"}])
 
 (deftest test-closed-session-idle-not-reactivated
   (testing "Closed session with :idle detection is NOT reactivated
@@ -174,35 +182,44 @@
           session {:agent-status :closed
                    :superseded false
                    :pane-id "%99"
-                   :agent-type :claude-code}]
+                   :agent-type :claude-code}
+          pane-infos (make-pane-infos "%99" "12345")]
       (with-redefs [capture/detect-agent-state
-                    (fn [_ _] {:status :idle :waiting-reason nil})]
-        (is (nil? (capture-fn session)))))))
+                    (fn [_ _] {:status :idle :waiting-reason nil})
+                    pane/find-agent-in-tree
+                    (fn [_ _] :found)]
+        (is (nil? (capture-fn session pane-infos)))))))
 
 (deftest test-closed-session-running-reactivated
-  (testing "Closed session with :running detection IS reactivated"
+  (testing "Closed session with :running detection and live agent IS reactivated"
     (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
           session {:agent-status :closed
                    :superseded false
                    :pane-id "%99"
-                   :agent-type :claude-code}]
+                   :agent-type :claude-code}
+          pane-infos (make-pane-infos "%99" "12345")]
       (with-redefs [capture/detect-agent-state
-                    (fn [_ _] {:status :running :waiting-reason nil})]
-        (let [result (capture-fn session)]
+                    (fn [_ _] {:status :running :waiting-reason nil})
+                    pane/find-agent-in-tree
+                    (fn [_ _] :found)]
+        (let [result (capture-fn session pane-infos)]
           (is (some? result))
           (is (= :running (:agent-status result))))))))
 
 (deftest test-closed-session-waiting-reactivated
-  (testing "Closed session with :waiting detection IS reactivated"
+  (testing "Closed session with :waiting detection and live agent IS reactivated"
     (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
           session {:agent-status :closed
                    :superseded false
                    :pane-id "%99"
-                   :agent-type :claude-code}]
+                   :agent-type :claude-code}
+          pane-infos (make-pane-infos "%99" "12345")]
       (with-redefs [capture/detect-agent-state
                     (fn [_ _] {:status :waiting
-                               :waiting-reason "respond"})]
-        (let [result (capture-fn session)]
+                               :waiting-reason "respond"})
+                    pane/find-agent-in-tree
+                    (fn [_ _] :found)]
+        (let [result (capture-fn session pane-infos)]
           (is (some? result))
           (is (= :waiting (:agent-status result))))))))
 
@@ -212,10 +229,13 @@
           session {:agent-status :closed
                    :superseded true
                    :pane-id "%99"
-                   :agent-type :claude-code}]
+                   :agent-type :claude-code}
+          pane-infos (make-pane-infos "%99" "12345")]
       (with-redefs [capture/detect-agent-state
-                    (fn [_ _] {:status :running :waiting-reason nil})]
-        (is (nil? (capture-fn session)))))))
+                    (fn [_ _] {:status :running :waiting-reason nil})
+                    pane/find-agent-in-tree
+                    (fn [_ _] :found)]
+        (is (nil? (capture-fn session pane-infos)))))))
 
 (deftest test-closed-no-pane-not-reactivated
   (testing "Closed session without pane-id is never reactivated"
@@ -223,7 +243,59 @@
           session {:agent-status :closed
                    :superseded false
                    :pane-id nil
-                   :agent-type :claude-code}]
+                   :agent-type :claude-code}
+          pane-infos (make-pane-infos "%99" "12345")]
       (with-redefs [capture/detect-agent-state
-                    (fn [_ _] {:status :running :waiting-reason nil})]
-        (is (nil? (capture-fn session)))))))
+                    (fn [_ _] {:status :running :waiting-reason nil})
+                    pane/find-agent-in-tree
+                    (fn [_ _] :found)]
+        (is (nil? (capture-fn session pane-infos)))))))
+
+;; --- New tests for stale session / pane reuse fixes ---
+
+(deftest test-closed-session-dead-agent-not-reactivated
+  (testing "Closed session with :running capture but dead agent is NOT reactivated
+            (prevents false reactivation from stale terminal output)"
+    (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
+          session {:agent-status :closed
+                   :superseded false
+                   :pane-id "%99"
+                   :agent-type :claude-code}
+          pane-infos (make-pane-infos "%99" "12345")]
+      (with-redefs [capture/detect-agent-state
+                    (fn [_ _] {:status :running :waiting-reason nil})
+                    pane/find-agent-in-tree
+                    (fn [_ _] :not-found)]
+        (is (nil? (capture-fn session pane-infos))
+            "Must not reactivate when agent process is dead")))))
+
+(deftest test-closed-session-unknown-agent-not-reactivated
+  (testing "Closed session with :unknown liveness is NOT reactivated
+            (conservative: requires confirmed :alive)"
+    (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
+          session {:agent-status :closed
+                   :superseded false
+                   :pane-id "%99"
+                   :agent-type :claude-code}
+          pane-infos (make-pane-infos "%99" "12345")]
+      (with-redefs [capture/detect-agent-state
+                    (fn [_ _] {:status :running :waiting-reason nil})
+                    pane/find-agent-in-tree
+                    (fn [_ _] :unknown)]
+        (is (nil? (capture-fn session pane-infos))
+            "Must not reactivate when agent liveness is unknown")))))
+
+(deftest test-closed-session-no-matching-pane-not-reactivated
+  (testing "Closed session whose pane-id is not in pane-infos is NOT reactivated"
+    (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
+          session {:agent-status :closed
+                   :superseded false
+                   :pane-id "%99"
+                   :agent-type :claude-code}
+          pane-infos [{:pane-id "%50" :pid "999" :cwd "/tmp/other"}]]
+      (with-redefs [capture/detect-agent-state
+                    (fn [_ _] {:status :running :waiting-reason nil})
+                    pane/find-agent-in-tree
+                    (fn [_ _] :found)]
+        (is (nil? (capture-fn session pane-infos))
+            "Must not reactivate when pane-id does not match any live pane")))))
