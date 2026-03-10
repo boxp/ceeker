@@ -101,6 +101,17 @@
     :codex #"(?i)codex"
     #"(?i)claude|codex"))
 
+(defn process-alive?
+  "Returns true if the process with the given PID exists.
+   Checks /proc on Linux, falls back to kill -0."
+  [pid]
+  (let [f (io/file (str "/proc/" pid))]
+    (if (.isDirectory f)
+      true
+      (try
+        (zero? (:exit (shell/sh "kill" "-0" (str pid))))
+        (catch Exception _ false)))))
+
 (declare find-agent-in-tree)
 
 (defn- search-children
@@ -121,7 +132,9 @@
   "Searches the process tree rooted at pid for an agent
    process matching the given agent-type.
    Returns :found, :not-found, or :unknown (when process
-   info is unavailable). Max depth prevents infinite loops."
+   info is unavailable). Max depth prevents infinite loops.
+   Distinguishes dead processes (:not-found) from
+   unreadable ones (:unknown) via process-alive? check."
   ([pid agent-type] (find-agent-in-tree pid agent-type 5))
   ([pid agent-type max-depth]
    (if (neg? max-depth)
@@ -129,12 +142,15 @@
      (let [pat (agent-pattern agent-type)
            cmdline (read-proc-cmdline pid)]
        (cond
-         (nil? cmdline) :unknown
+         (nil? cmdline)
+         (if (process-alive? pid) :unknown :not-found)
          (re-find pat cmdline) :found
          :else
          (let [children (child-pids pid)]
            (if (nil? children)
-             :unknown
+             (if (process-alive? pid)
+               :unknown
+               :not-found)
              (search-children
               children agent-type
               (dec max-depth)))))))))
@@ -192,28 +208,36 @@
                      session pane-infos))
            :else false))))
 
+(def ^:private capturable-statuses
+  "Session statuses eligible for capture-pane refresh."
+  #{:running :idle :waiting})
+
+(defn- run-stale-cleanup!
+  "Runs stale-close, dedup, and purge for the given dir."
+  [dir pane-cwds pane-ids pane-infos]
+  (store/close-sessions-by-pred!
+   dir
+   (fn [_sid session]
+     (stale-session? session pane-cwds pane-infos)))
+  (store/close-dup-pane-sessions! dir)
+  (store/purge-expired-closed-sessions! dir pane-ids))
+
 (defn close-stale-sessions!
   "Checks running sessions and marks stale ones as closed.
-   Also purges expired closed sessions whose pane is gone.
-   Atomically updates all stale sessions under file lock.
+   Also deduplicates and purges expired sessions.
    Does nothing if tmux is unavailable (nil)."
   ([] (close-stale-sessions! nil))
   ([state-dir]
    (let [pane-infos (list-pane-info)]
      (when (some? pane-infos)
        (let [pane-cwds (into #{} (map :cwd) pane-infos)
-             pane-ids (into #{} (map :pane-id) pane-infos)
-             pred (fn [_sid session]
-                    (stale-session?
-                     session pane-cwds pane-infos))]
+             pane-ids (into #{} (map :pane-id) pane-infos)]
          (if state-dir
-           (do (store/close-sessions-by-pred!
-                state-dir pred)
-               (store/purge-expired-closed-sessions!
-                state-dir pane-ids))
-           (do (store/close-sessions-by-pred! pred)
-               (store/purge-expired-closed-sessions!
-                pane-ids))))))))
+           (run-stale-cleanup!
+            state-dir pane-cwds pane-ids pane-infos)
+           (run-stale-cleanup!
+            (store/state-dir)
+            pane-cwds pane-ids pane-infos)))))))
 
 (def ^:private debounce-ms
   "Minimum time (ms) since last hook update before
@@ -233,10 +257,6 @@
         (< (- now updated) debounce-ms))
       (catch Exception _ false))
     false))
-
-(def ^:private capturable-statuses
-  "Session statuses eligible for capture-pane refresh."
-  #{:running :idle :waiting})
 
 (defn- capture-state-for-session
   "Detects state for an active session via capture-pane.

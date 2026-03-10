@@ -307,6 +307,43 @@
       (finally
         (cleanup-dir dir)))))
 
+(deftest test-supersede-idle-session-closed
+  (testing "Idle session in same pane is superseded by new
+            running session"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session!
+         dir "old"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "working"})
+        ;; Simulate capture-based transition to idle
+        (store/update-session-if-active!
+         dir "old"
+         {:agent-status :idle})
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "old"])]
+          (is (= :idle (:agent-status s))))
+        ;; New session starts in same pane
+        (store/update-session!
+         dir "new"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"
+          :last-message "resumed"})
+        (let [state (store/read-sessions dir)
+              old (get-in state [:sessions "old"])
+              new-s (get-in state [:sessions "new"])]
+          (is (= :closed (:agent-status old))
+              "Idle session must be superseded")
+          (is (true? (:superseded old)))
+          (is (= :running (:agent-status new-s))))
+        (finally
+          (cleanup-dir dir))))))
+
 (deftest test-supersede-empty-pane-id-no-close
   (let [dir (temp-dir)]
     (try
