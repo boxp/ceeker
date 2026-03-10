@@ -146,15 +146,19 @@
        (when msg (str "\n" msg))))
 
 (defn- handle-enter-key
-  "Handles Enter key press on selected session."
+  "Handles Enter key press on selected session.
+   Returns a map with :msg and :jumped keys."
   [visible selected]
   (if (empty? visible)
-    (view/render-error "No sessions")
+    {:msg (view/render-error "No sessions")
+     :jumped false}
     (let [result (tmux-jump! (nth visible selected))]
       (if (:success result)
-        (view/render-message
-         (str "Jumped to: " (:target result)))
-        (view/render-error (:error result))))))
+        {:msg (view/render-message
+               (str "Jumped to: " (:target result)))
+         :jumped true}
+        {:msg (view/render-error (:error result))
+         :jumped false}))))
 
 (defn- handle-search-key
   "Handles a key press in search mode.
@@ -180,9 +184,18 @@
     :else
     {:sm? true :sb search-buf :fs filter-state}))
 
+(defn- enter-key-result
+  "Handles Enter key: jump and optionally quit."
+  [sel visible fs exit-on-jump?]
+  (let [{:keys [msg jumped]} (handle-enter-key
+                              visible sel)]
+    (if (and jumped exit-on-jump?)
+      {:quit true}
+      {:sel sel :fs fs :msg msg})))
+
 (defn- nav-key-result
   "Handles navigation and action keys."
-  [key sel max-idx visible fs display-mode]
+  [key sel max-idx visible fs display-mode exit-on-jump?]
   (cond
     (= key \q) {:quit true}
     (or (= key :up) (= key \k))
@@ -190,8 +203,7 @@
     (or (= key :down) (= key \j))
     {:sel (min max-idx (inc sel)) :fs fs}
     (= key :enter)
-    {:sel sel :fs fs
-     :msg (handle-enter-key visible sel)}
+    (enter-key-result sel visible fs exit-on-jump?)
     (= key \r)
     {:sel sel :fs fs
      :msg (view/render-message "Refreshed")}
@@ -215,17 +227,18 @@
 
 (defn- handle-normal-key
   "Processes a key in normal mode."
-  [key sel max-idx visible fs display-mode]
+  [key sel max-idx visible fs display-mode exit-on-jump?]
   (let [result (or (nav-key-result
                     key sel max-idx visible fs
-                    display-mode)
+                    display-mode exit-on-jump?)
                    (filter-key-result key fs)
                    {:sel sel :fs fs})]
     (assoc result :dm (get result :dm display-mode))))
 
 (defn- process-key
   "Dispatches key to appropriate handler."
-  [key clamped sm? sb visible max-idx fs display-mode]
+  [key clamped sm? sb visible max-idx fs display-mode
+   exit-on-jump?]
   (cond
     (nil? key) {:idle true}
     sm? (let [r (handle-search-key key sb fs)]
@@ -234,7 +247,7 @@
            :dm display-mode})
     :else (handle-normal-key
            key clamped max-idx visible
-           fs display-mode)))
+           fs display-mode exit-on-jump?)))
 
 (defn- wait-for-input
   "Waits for key or file change, returns key or nil.
@@ -282,7 +295,7 @@
 (defn- tui-loop
   "Main TUI render-input loop.
    Pane checks run in a separate async/thread worker."
-  [terminal w state-dir]
+  [terminal w state-dir exit-on-jump?]
   (loop [sel 0 msg nil fs f/empty-filter
          sm? false sb nil display-mode :auto]
     (let [{:keys [key cl visible mx]}
@@ -290,21 +303,25 @@
                            sel msg fs sm? sb
                            display-mode)
           r (process-key key cl sm? sb visible mx
-                         fs display-mode)]
+                         fs display-mode exit-on-jump?)]
       (when-let [ns (next-loop-state r cl fs sm? sb
                                      display-mode)]
         (let [[nsel nmsg nfs nsm? nsb ndm] ns]
           (recur nsel nmsg nfs nsm? nsb ndm))))))
 
 (defn start-tui!
-  "Runs the TUI application loop."
+  "Runs the TUI application loop.
+   opts may include :exit-on-jump to quit after a
+   successful jump."
   ([] (start-tui! nil))
-  ([state-dir]
+  ([state-dir] (start-tui! state-dir {}))
+  ([state-dir opts]
    (let [terminal (input/create-terminal)
          w (create-watcher-for state-dir)
-         stop-ch (start-pane-checker! state-dir)]
+         stop-ch (start-pane-checker! state-dir)
+         exit-on-jump? (:exit-on-jump opts)]
      (try
-       (tui-loop terminal w state-dir)
+       (tui-loop terminal w state-dir exit-on-jump?)
        (finally
          (async/close! stop-ch)
          (print "\033[2J\033[H")

@@ -14,7 +14,8 @@
 
 (def cli-options
   [["-h" "--help" "Show help"]
-   ["-V" "--version" "Show version"]])
+   ["-V" "--version" "Show version"]
+   [nil "--exit-on-jump" "Exit after a successful jump"]])
 
 (defn- usage
   "Returns usage string."
@@ -129,5 +130,7 @@
        (= "hook" (first arguments))
        (handle-hook-command (rest arguments))
        :else
-       (do (tui/start-tui!)
+       (do (tui/start-tui!
+            nil
+            {:exit-on-jump (:exit-on-jump options)})
            (System/exit 0))))))

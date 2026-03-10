@@ -85,13 +85,21 @@ Displays a list of all active sessions.
 | `c` | Clear all filters |
 | `q` | Quit |
 
+### Exit on Jump
+
+With `--exit-on-jump`, ceeker exits automatically after a successful jump. This is useful when running ceeker as a one-shot popup — select a session, jump, and the popup closes by itself.
+
+```bash
+ceeker --exit-on-jump
+```
+
 ## Handy tmux configuration
 
-You can open ceeker as a popup from anywhere inside tmux.
+You can open ceeker as a popup from anywhere inside tmux. Combine with `--exit-on-jump` so the popup closes automatically after you select a pane.
 
 ```tmux
 # Show a popup with all Claude Code / Codex states via prefix + C-k
-bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker"
+bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker --exit-on-jump"
 ```
 
 ## Setup (Required)
