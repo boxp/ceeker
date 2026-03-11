@@ -225,7 +225,7 @@
   (let [dir (temp-dir)]
     (try
       (with-redefs [handler/current-pane-id
-                     (constantly "%99")]
+                    (constantly "%99")]
         (let [notif-payload
               (json/generate-string
                {:session_id "preserve-1"
@@ -255,7 +255,7 @@
   (let [dir (temp-dir)]
     (try
       (with-redefs [handler/current-pane-id
-                     (constantly "%99")]
+                    (constantly "%99")]
         (let [notif-payload
               (json/generate-string
                {:session_id "stop-msg-1"
@@ -286,7 +286,7 @@
   (let [dir (temp-dir)]
     (try
       (with-redefs [handler/current-pane-id
-                     (constantly "%10")]
+                    (constantly "%10")]
         (let [payload
               (json/generate-string
                {:session_id "abc123"
@@ -344,7 +344,7 @@
   (let [dir (temp-dir)]
     (try
       (with-redefs [handler/current-pane-id
-                     (constantly "%5")]
+                    (constantly "%5")]
         (let [payload (json/generate-string
                        {:session_id "hook-test-1"
                         :transcript_path "/tmp/t.json"
@@ -370,7 +370,7 @@
   (let [dir (temp-dir)]
     (try
       (with-redefs [handler/current-pane-id
-                     (constantly "%7")]
+                    (constantly "%7")]
         (let [payload
               (json/generate-string
                {:type "agent-turn-complete"
@@ -404,7 +404,7 @@
   (let [dir (temp-dir)]
     (try
       (with-redefs [handler/current-pane-id
-                     (constantly "%8")]
+                    (constantly "%8")]
         (let [payload
               (json/generate-string
                {:type "agent-turn-complete"
@@ -423,7 +423,7 @@
   (let [dir (temp-dir)]
     (try
       (with-redefs [handler/current-pane-id
-                     (constantly "%9")]
+                    (constantly "%9")]
         (let [payload
               (json/generate-string
                {:session_id "legacy-1"
@@ -479,7 +479,7 @@
     (let [dir (temp-dir)]
       (try
         (with-redefs [handler/current-pane-id
-                       (constantly "%42")]
+                      (constantly "%42")]
           (handler/handle-hook!
            dir "claude" "SessionStart"
            (json/generate-string
@@ -508,7 +508,7 @@
     (let [dir (temp-dir)]
       (try
         (with-redefs [handler/current-pane-id
-                       (constantly "")]
+                      (constantly "")]
           (handler/handle-hook!
            dir "claude" "SessionStart"
            (json/generate-string

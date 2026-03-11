@@ -194,7 +194,6 @@
                      session pane-infos))
            :else false))))
 
-
 (defn- run-stale-cleanup!
   "Runs stale-close and purge for the given dir."
   [dir pane-cwds pane-ids pane-infos]

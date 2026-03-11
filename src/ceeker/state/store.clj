@@ -236,7 +236,6 @@
      (with-file-lock dir
        #(write-state-file! path {:sessions {}})))))
 
-
 (def ^:const closed-ttl-ms
   "Time-to-live (ms) for closed sessions before purging.
    Default: 5 minutes."
