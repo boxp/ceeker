@@ -83,12 +83,49 @@
        (validate-state-dir! f)
        (create-state-dir! f)))))
 
+(defn- parse-timestamp-ms
+  "Parses an ISO-8601 timestamp to epoch millis.
+   Returns 0 on failure."
+  [ts]
+  (if ts
+    (try (.toEpochMilli (java.time.Instant/parse ts))
+         (catch Exception _ 0))
+    0))
+
+(defn- pick-newer
+  "Returns the entry with the latest :last-updated.
+   Prefers existing when timestamps are equal."
+  [existing incoming]
+  (if (> (parse-timestamp-ms (:last-updated incoming))
+         (parse-timestamp-ms (:last-updated existing)))
+    incoming
+    existing))
+
+(defn normalize-sessions
+  "Re-keys sessions by :pane-id (canonical key).
+   Entries with non-empty :pane-id are keyed by pane-id;
+   entries without :pane-id keep their original key.
+   When multiple entries share the same pane-id, the one
+   with the latest :last-updated wins."
+  [sessions]
+  (reduce-kv
+   (fn [acc key session]
+     (let [pane-id (:pane-id session)
+           canonical (if (seq pane-id) pane-id key)]
+       (if-let [existing (get acc canonical)]
+         (assoc acc canonical (pick-newer existing session))
+         (assoc acc canonical session))))
+   {}
+   sessions))
+
 (defn- read-state-file
-  "Reads and parses the sessions.edn file."
+  "Reads and parses the sessions.edn file.
+   Normalizes sessions to pane-id canonical keys."
   [path]
   (let [f (io/file path)]
     (if (and (.exists f) (pos? (.length f)))
-      (edn/read-string (slurp f))
+      (let [state (edn/read-string (slurp f))]
+        (update state :sessions normalize-sessions))
       {:sessions {}})))
 
 (defn- write-state-file!

@@ -1,5 +1,6 @@
 (ns ceeker.state.store-test
   (:require [ceeker.state.store :as store]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]))
 
@@ -368,5 +369,190 @@
                         [:sessions "some-session-id"])]
           (is (some? s))
           (is (= :running (:agent-status s))))
+        (finally
+          (cleanup-dir dir))))))
+
+;; --- Pane-centric migration: normalize-sessions ---
+
+(deftest test-normalize-mixed-keys
+  (testing "Mixed session-id and pane-id keys are normalized
+            to a single pane-id entry"
+    (let [sessions {"0769ea34-abcd-1234-5678-000000000000"
+                    {:session-id "0769ea34"
+                     :agent-type :claude-code
+                     :agent-status :running
+                     :cwd "/tmp/work"
+                     :pane-id "%66"
+                     :last-updated "2026-03-10T10:00:00Z"
+                     :last-message "old"}
+                    "%66"
+                    {:session-id "newer-session"
+                     :agent-type :claude-code
+                     :agent-status :running
+                     :cwd "/tmp/work"
+                     :pane-id "%66"
+                     :last-updated "2026-03-10T11:00:00Z"
+                     :last-message "new"}}
+          result (store/normalize-sessions sessions)]
+      (is (= 1 (count result))
+          "Same pane-id entries should be merged into one")
+      (is (some? (get result "%66"))
+          "Canonical key should be pane-id")
+      (is (nil? (get result
+                     "0769ea34-abcd-1234-5678-000000000000"))
+          "Old session-id key should be removed")
+      (is (= "new" (:last-message (get result "%66")))
+          "Entry with latest last-updated should win"))))
+
+(deftest test-normalize-keeps-newer-entry
+  (testing "When session-id key has newer timestamp, it wins"
+    (let [sessions {"old-uuid"
+                    {:session-id "old-uuid"
+                     :agent-type :claude-code
+                     :agent-status :completed
+                     :pane-id "%10"
+                     :last-updated "2026-03-11T12:00:00Z"
+                     :last-message "later"}
+                    "%10"
+                    {:session-id "new-uuid"
+                     :agent-type :claude-code
+                     :agent-status :running
+                     :pane-id "%10"
+                     :last-updated "2026-03-10T08:00:00Z"
+                     :last-message "earlier"}}
+          result (store/normalize-sessions sessions)]
+      (is (= 1 (count result)))
+      (is (= "later" (:last-message (get result "%10")))
+          "Entry with later timestamp should win"))))
+
+(deftest test-normalize-different-panes-separate
+  (testing "Entries with different pane-ids stay separate"
+    (let [sessions {"uuid-a"
+                    {:session-id "uuid-a"
+                     :agent-type :claude-code
+                     :agent-status :running
+                     :pane-id "%1"
+                     :last-updated "2026-03-10T10:00:00Z"}
+                    "uuid-b"
+                    {:session-id "uuid-b"
+                     :agent-type :codex
+                     :agent-status :running
+                     :pane-id "%2"
+                     :last-updated "2026-03-10T10:00:00Z"}}
+          result (store/normalize-sessions sessions)]
+      (is (= 2 (count result)))
+      (is (some? (get result "%1")))
+      (is (some? (get result "%2"))))))
+
+(deftest test-normalize-empty-pane-id-keeps-original-key
+  (testing "Entries without pane-id keep their original key"
+    (let [sessions {"some-uuid"
+                    {:session-id "some-uuid"
+                     :agent-type :claude-code
+                     :agent-status :running
+                     :pane-id ""
+                     :last-updated "2026-03-10T10:00:00Z"}}
+          result (store/normalize-sessions sessions)]
+      (is (= 1 (count result)))
+      (is (some? (get result "some-uuid"))
+          "Non-tmux session keeps session-id as key"))))
+
+(deftest test-normalize-multiple-legacy-same-pane
+  (testing "Multiple legacy session-id keys for same pane
+            are collapsed to one"
+    (let [sessions {"uuid-1"
+                    {:session-id "uuid-1"
+                     :agent-type :claude-code
+                     :agent-status :completed
+                     :pane-id "%42"
+                     :last-updated "2026-03-10T08:00:00Z"
+                     :last-message "first"}
+                    "uuid-2"
+                    {:session-id "uuid-2"
+                     :agent-type :claude-code
+                     :agent-status :running
+                     :pane-id "%42"
+                     :last-updated "2026-03-10T10:00:00Z"
+                     :last-message "second"}
+                    "uuid-3"
+                    {:session-id "uuid-3"
+                     :agent-type :claude-code
+                     :agent-status :idle
+                     :pane-id "%42"
+                     :last-updated "2026-03-10T09:00:00Z"
+                     :last-message "third"}}
+          result (store/normalize-sessions sessions)]
+      (is (= 1 (count result))
+          "All entries for same pane-id collapse to one")
+      (is (= "second" (:last-message (get result "%42")))
+          "Entry with latest timestamp should win"))))
+
+(deftest test-mixed-state-read-write-cleanup
+  (testing "Reading mixed state then writing produces clean file"
+    (let [dir (temp-dir)]
+      (try
+        (store/ensure-state-dir! dir)
+        (spit (store/state-file-path dir)
+              (pr-str
+               {:sessions
+                {"old-uuid"
+                 {:session-id "old-uuid"
+                  :agent-type :claude-code
+                  :agent-status :completed
+                  :pane-id "%50"
+                  :last-updated "2026-03-10T08:00:00Z"
+                  :last-message "old"}
+                 "%50"
+                 {:session-id "new-uuid"
+                  :agent-type :claude-code
+                  :agent-status :running
+                  :pane-id "%50"
+                  :last-updated "2026-03-10T12:00:00Z"
+                  :last-message "current"}}}))
+        (let [state (store/read-sessions dir)
+              sessions (:sessions state)]
+          (is (= 1 (count sessions))
+              "Mixed state normalized on read")
+          (is (= "current"
+                 (:last-message (get sessions "%50")))))
+        (store/update-session! dir "%50"
+                               {:last-message "updated"})
+        (let [raw (edn/read-string
+                   (slurp (store/state-file-path dir)))
+              ks (keys (:sessions raw))]
+          (is (= 1 (count ks))
+              "File contains only canonical keys after write")
+          (is (= "%50" (first ks))
+              "Key should be pane-id"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-update-after-normalize-no-legacy-remnants
+  (testing "update-session! on normalized state leaves
+            no legacy key remnants"
+    (let [dir (temp-dir)]
+      (try
+        (store/ensure-state-dir! dir)
+        (spit (store/state-file-path dir)
+              (pr-str
+               {:sessions
+                {"legacy-uuid"
+                 {:session-id "legacy-uuid"
+                  :agent-type :claude-code
+                  :agent-status :running
+                  :pane-id "%77"
+                  :last-updated "2026-03-10T08:00:00Z"
+                  :last-message "legacy"}}}))
+        (store/update-session! dir "%77"
+                               {:agent-status :completed
+                                :last-message "done"})
+        (let [state (store/read-sessions dir)
+              sessions (:sessions state)]
+          (is (= 1 (count sessions)))
+          (is (some? (get sessions "%77")))
+          (is (nil? (get sessions "legacy-uuid"))
+              "Legacy key should not exist after update")
+          (is (= :completed
+                 (:agent-status (get sessions "%77")))))
         (finally
           (cleanup-dir dir))))))
