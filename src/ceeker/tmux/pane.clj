@@ -9,20 +9,6 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
 
-(defn list-pane-cwds
-  "Runs tmux list-panes -a once, returns a set of pane cwds.
-   Returns nil if tmux is unavailable."
-  []
-  (try
-    (let [result (shell/sh
-                  "tmux" "list-panes" "-a"
-                  "-F" "#{pane_current_path}")]
-      (when (zero? (:exit result))
-        (set (remove str/blank?
-                     (str/split-lines
-                      (:out result))))))
-    (catch Exception _ nil)))
-
 (def ^:private pane-separator "|||")
 
 (def ^:private pane-sep-re
@@ -208,18 +194,14 @@
                      session pane-infos))
            :else false))))
 
-(def ^:private capturable-statuses
-  "Session statuses eligible for capture-pane refresh."
-  #{:running :idle :waiting})
 
 (defn- run-stale-cleanup!
-  "Runs stale-close, dedup, and purge for the given dir."
+  "Runs stale-close and purge for the given dir."
   [dir pane-cwds pane-ids pane-infos]
   (store/close-sessions-by-pred!
    dir
-   (fn [_sid session]
+   (fn [_key session]
      (stale-session? session pane-cwds pane-infos)))
-  (store/close-dup-pane-sessions! dir)
   (store/purge-expired-closed-sessions! dir pane-ids))
 
 (defn close-stale-sessions!
@@ -264,7 +246,7 @@
    needed. Processes running, idle, and waiting sessions
    so intermediate transitions are tracked."
   [session]
-  (when (and (contains? capturable-statuses
+  (when (and (contains? store/capturable-statuses
                         (:agent-status session))
              (seq (:pane-id session))
              (not (recently-updated? session)))
@@ -286,7 +268,7 @@
   #{:running :waiting})
 
 (defn- capture-state-for-closed-session
-  "Detects state for a closed (non-superseded) session.
+  "Detects state for a closed session.
    Returns updated session data only when the agent is
    actively running or waiting, not merely idle.
    Requires process-tree confirmation that the agent is
@@ -294,7 +276,6 @@
    stale terminal output left after agent exit."
   [session pane-infos]
   (when (and (= :closed (:agent-status session))
-             (not (:superseded session))
              (seq (:pane-id session))
              (= :alive (session-has-live-agent?
                         session pane-infos)))
@@ -309,22 +290,22 @@
 
 (defn- refresh-one-session!
   "Refreshes a single session's state via capture-pane."
-  [state-dir sid session pane-infos]
+  [state-dir session-key session pane-infos]
   (if-let [update-data
            (capture-state-for-session session)]
     (if state-dir
       (store/update-session-if-active!
-       state-dir sid update-data)
+       state-dir session-key update-data)
       (store/update-session-if-active!
-       sid update-data))
+       session-key update-data))
     (when-let [reactivate-data
                (capture-state-for-closed-session
                 session pane-infos)]
       (if state-dir
         (store/reactivate-closed-session!
-         state-dir sid reactivate-data)
+         state-dir session-key reactivate-data)
         (store/reactivate-closed-session!
-         sid reactivate-data)))))
+         session-key reactivate-data)))))
 
 (defn refresh-session-states!
   "Refreshes active session states via capture-pane.
@@ -337,6 +318,6 @@
                  (store/read-sessions))
          sessions (:sessions state)
          pane-infos (or (list-pane-info) [])]
-     (doseq [[sid session] sessions]
+     (doseq [[session-key session] sessions]
        (refresh-one-session!
-        state-dir sid session pane-infos)))))
+        state-dir session-key session pane-infos)))))

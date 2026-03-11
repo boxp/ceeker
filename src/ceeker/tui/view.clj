@@ -47,11 +47,6 @@
     :codex (str ansi-blue "[Codex]" ansi-reset)
     (str ansi-dim "[???]" ansi-reset)))
 
-(defn- truncate [s max-len]
-  (if (and s (> (count s) max-len))
-    (str (subs s 0 (- max-len 1)) "…")
-    (or s "")))
-
 (defn- char-display-width
   "Returns terminal display width of a character (2 for CJK/fullwidth, 1 otherwise)."
   [c]
@@ -175,52 +170,49 @@
 (defn- format-session-columns
   "Builds column values for a table row as a single string."
   [session]
-  (let [sid (pad-to-width (truncate (:session-id session) 12)
-                          12)
-        agent (pad-to-width
+  (let [agent (pad-to-width
                (agent-badge (:agent-type session)) 9)
         status (pad-to-width
                 (status-badge (:agent-status session)) 11)
         wt (pad-to-width
-            (or (cwd-short-name (:cwd session)) "") 12)
+            (or (cwd-short-name (:cwd session)) "") 14)
         msg (-> (:last-message session)
                 normalize-message
-                (truncate-by-width 40)
-                (pad-to-width 40))]
-    (str sid " " agent " " status " "
+                (truncate-by-width 44)
+                (pad-to-width 44))]
+    (str agent " " status " "
          wt " " msg " "
          (format-time (:last-updated session)))))
 
 (defn- format-session-line
   "Formats a single session line for display."
-  [session selected? _index]
+  [session selected?]
   (let [pfx (if selected?
               (str ansi-reverse " > " ansi-reset ansi-reverse)
               "   ")
         sfx (if selected? ansi-reset "")]
     (str pfx " " (format-session-columns session) sfx)))
 
-(defn- card-line1 [session selected? sel-start sel-end]
-  (str "  ┌ " sel-start
-       (truncate (:session-id session) 12)
-       " " (agent-badge (:agent-type session))
-       (when selected? ansi-reverse)
-       " " (status-badge (:agent-status session))
-       (when selected? ansi-reverse)
-       sel-end))
+(defn- card-line1 [session selected?]
+  (let [sel-start (if selected? ansi-reverse "")
+        sel-end (if selected? ansi-reset "")]
+    (str "  ┌ " sel-start
+         (agent-badge (:agent-type session))
+         (when selected? ansi-reverse)
+         " " (status-badge (:agent-status session))
+         (when selected? ansi-reverse)
+         sel-end)))
 
-(defn- card-line2 [session sel-start sel-end content-width]
+(defn- card-line2 [session content-width]
   (let [time-str (format-time (:last-updated session))
         wt-max (max 5 (- content-width (str-display-width time-str) 2))]
-    (str sel-start
-         "  │ " time-str
+    (str "  │ " time-str
          "  " (truncate-by-width (or (cwd-short-name (:cwd session)) "")
-                                 wt-max)
-         sel-end)))
+                                 wt-max))))
 
 (defn- card-message-lines
   "Wraps message text into card lines with border prefix."
-  [message content-width sel-start sel-end]
+  [message content-width]
   (let [normalized (str/replace (or message "") #"\r?\n" " ")
         wrapped (wrap-by-width normalized content-width)
         truncated? (> (count wrapped) max-card-message-lines)
@@ -233,20 +225,17 @@
                                             (dec content-width))
                            "…"))
                 visible)]
-    (mapv (fn [line] (str sel-start "  │ " line sel-end)) final)))
+    (mapv (fn [line] (str "  │ " line)) final)))
 
 (defn- format-session-card
   "Formats a single session as a compact card for narrow terminals.
    Selection highlight is applied only to the header row (line1)."
-  [session selected? _index width]
+  [session selected? width]
   (let [content-width (max 10 (- width 4))
-        sel-start (if selected? ansi-reverse "")
-        sel-end (if selected? ansi-reset "")
-        line1 (card-line1 session selected? sel-start sel-end)
-        line2 (card-line2 session "" "" content-width)
+        line1 (card-line1 session selected?)
+        line2 (card-line2 session content-width)
         msg-lines (card-message-lines
-                   (:last-message session) content-width
-                   "" "")
+                   (:last-message session) content-width)
         line-end "  └─"]
     (str/join "\n" (concat [line1 line2] msg-lines [line-end]))))
 
@@ -262,7 +251,7 @@
 (defn- header-line
   "Returns the header line with filter info."
   [total shown fs]
-  (let [base (format "  ceeker — %d session(s)" total)
+  (let [base (format "  ceeker — %d pane(s)" total)
         desc (when (f/active? fs)
                (str " [" (f/describe-filters fs)
                     " → " shown " shown]"))]
@@ -279,11 +268,10 @@
 (defn- column-headers []
   (str ansi-dim
        "   "
-       (pad-to-width "SESSION" 12) " "
        (pad-to-width "AGENT" 9) " "
        (pad-to-width "STATUS" 11) " "
-       (pad-to-width "WORKTREE" 12) " "
-       (pad-to-width "MESSAGE" 40) " "
+       (pad-to-width "WORKTREE" 14) " "
+       (pad-to-width "MESSAGE" 44) " "
        "UPDATED"
        ansi-reset))
 
@@ -324,10 +312,10 @@
     [(str "   " ansi-dim "(no sessions)" ansi-reset)]
     (if compact?
       (map-indexed
-       (fn [i s] (format-session-card s (= i sel) i width))
+       (fn [i s] (format-session-card s (= i sel) width))
        sorted)
       (map-indexed
-       (fn [i s] (format-session-line s (= i sel) i))
+       (fn [i s] (format-session-line s (= i sel)))
        sorted))))
 
 (defn render

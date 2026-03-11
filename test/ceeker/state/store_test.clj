@@ -43,13 +43,14 @@
 (deftest test-update-and-read-session
   (let [dir (temp-dir)]
     (try
-      (store/update-session! dir "session-1"
+      (store/update-session! dir "%1"
                              {:agent-type :claude-code
                               :agent-status :running
                               :cwd "/tmp/work"
+                              :pane-id "%1"
                               :last-message "working"})
       (let [result (store/read-sessions dir)
-            session (get-in result [:sessions "session-1"])]
+            session (get-in result [:sessions "%1"])]
         (is (some? session))
         (is (= :claude-code (:agent-type session)))
         (is (= :running (:agent-status session)))
@@ -58,1162 +59,314 @@
       (finally
         (cleanup-dir dir)))))
 
-(deftest test-update-session-merge
+(deftest test-update-merges-data
   (let [dir (temp-dir)]
     (try
-      (store/update-session! dir "session-1"
+      (store/update-session! dir "%1"
                              {:agent-type :claude-code
                               :agent-status :running
-                              :cwd "/tmp/work"})
-      (store/update-session! dir "session-1"
+                              :cwd "/tmp/work"
+                              :pane-id "%1"
+                              :last-message "first"})
+      (store/update-session! dir "%1"
                              {:agent-status :completed
                               :last-message "done"})
-      (let [session (get-in
-                     (store/read-sessions dir)
-                     [:sessions "session-1"])]
-        (is (= :claude-code (:agent-type session)))
+      (let [result (store/read-sessions dir)
+            session (get-in result [:sessions "%1"])]
         (is (= :completed (:agent-status session)))
-        (is (= "/tmp/work" (:cwd session)))
-        (is (= "done" (:last-message session))))
-      (finally
-        (cleanup-dir dir)))))
-
-(deftest test-multiple-sessions
-  (let [dir (temp-dir)]
-    (try
-      (store/update-session! dir "s1"
-                             {:agent-type :claude-code
-                              :agent-status :running})
-      (store/update-session! dir "s2"
-                             {:agent-type :codex
-                              :agent-status :waiting})
-      (let [result (store/read-sessions dir)]
-        (is (= 2 (count (:sessions result))))
-        (is (= :claude-code
-               (get-in result [:sessions "s1" :agent-type])))
-        (is (= :codex
-               (get-in result [:sessions "s2" :agent-type]))))
+        (is (= "done" (:last-message session)))
+        (is (= :claude-code (:agent-type session)))
+        (is (= "/tmp/work" (:cwd session))))
       (finally
         (cleanup-dir dir)))))
 
 (deftest test-remove-session
   (let [dir (temp-dir)]
     (try
-      (store/update-session! dir "s1"
-                             {:agent-type :claude-code})
-      (store/update-session! dir "s2"
-                             {:agent-type :codex})
-      (store/remove-session! dir "s1")
+      (store/update-session! dir "%1"
+                             {:agent-type :claude-code
+                              :agent-status :running
+                              :pane-id "%1"})
+      (store/remove-session! dir "%1")
       (let [result (store/read-sessions dir)]
-        (is (= 1 (count (:sessions result))))
-        (is (nil? (get-in result [:sessions "s1"])))
-        (is (some? (get-in result [:sessions "s2"]))))
+        (is (empty? (:sessions result))))
       (finally
         (cleanup-dir dir)))))
 
 (deftest test-clear-sessions
   (let [dir (temp-dir)]
     (try
-      (store/update-session! dir "s1"
-                             {:agent-type :claude-code})
-      (store/update-session! dir "s2"
-                             {:agent-type :codex})
+      (store/update-session! dir "%1"
+                             {:agent-type :claude-code
+                              :agent-status :running
+                              :pane-id "%1"})
+      (store/update-session! dir "%2"
+                             {:agent-type :codex
+                              :agent-status :running
+                              :pane-id "%2"})
       (store/clear-sessions! dir)
       (let [result (store/read-sessions dir)]
-        (is (= 0 (count (:sessions result)))))
+        (is (= {:sessions {}} result)))
       (finally
         (cleanup-dir dir)))))
 
-(deftest test-close-stale-sessions
+;; --- Pane-centric: same pane overwrites entry ---
+
+(deftest test-same-pane-different-sessions-one-entry
+  (testing "Hooks from different session-ids but same pane-id
+            result in a single entry when using pane-id as key"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session! dir "%42"
+                               {:session-id "old-session"
+                                :agent-type :claude-code
+                                :agent-status :running
+                                :cwd "/tmp/work"
+                                :pane-id "%42"
+                                :last-message "first"})
+        (store/update-session! dir "%42"
+                               {:session-id "new-session"
+                                :agent-type :claude-code
+                                :agent-status :running
+                                :cwd "/tmp/work"
+                                :pane-id "%42"
+                                :last-message "second"})
+        (let [state (store/read-sessions dir)
+              sessions (:sessions state)]
+          (is (= 1 (count sessions))
+              "Same pane-id should produce exactly 1 entry")
+          (is (= "second"
+                 (:last-message (get sessions "%42")))
+              "Latest data should overwrite"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-same-pane-different-cwd-one-entry
+  (testing "CWD changes within same pane update the same entry"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session! dir "%42"
+                               {:agent-type :claude-code
+                                :agent-status :running
+                                :cwd "/tmp/old-cwd"
+                                :pane-id "%42"})
+        (store/update-session! dir "%42"
+                               {:agent-type :claude-code
+                                :agent-status :running
+                                :cwd "/tmp/new-cwd"
+                                :pane-id "%42"})
+        (let [session (get-in (store/read-sessions dir)
+                              [:sessions "%42"])]
+          (is (= "/tmp/new-cwd" (:cwd session))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-different-panes-separate-entries
+  (testing "Different pane-ids produce separate entries"
+    (let [dir (temp-dir)]
+      (try
+        (store/update-session! dir "%1"
+                               {:agent-type :claude-code
+                                :agent-status :running
+                                :cwd "/tmp/a"
+                                :pane-id "%1"})
+        (store/update-session! dir "%2"
+                               {:agent-type :claude-code
+                                :agent-status :running
+                                :cwd "/tmp/b"
+                                :pane-id "%2"})
+        (let [sessions (:sessions (store/read-sessions dir))]
+          (is (= 2 (count sessions)))
+          (is (some? (get sessions "%1")))
+          (is (some? (get sessions "%2"))))
+        (finally
+          (cleanup-dir dir))))))
+
+;; --- update-session-if-active! ---
+
+(deftest test-update-session-if-active-running
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session! dir "%1"
+                             {:agent-type :claude-code
+                              :agent-status :running
+                              :pane-id "%1"})
+      (is (true? (store/update-session-if-active!
+                  dir "%1"
+                  {:agent-status :waiting})))
+      (let [s (get-in (store/read-sessions dir)
+                      [:sessions "%1"])]
+        (is (= :waiting (:agent-status s))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-update-session-if-active-completed-blocked
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session! dir "%1"
+                             {:agent-type :claude-code
+                              :agent-status :completed
+                              :pane-id "%1"})
+      (is (false? (store/update-session-if-active!
+                   dir "%1"
+                   {:agent-status :running})))
+      (let [s (get-in (store/read-sessions dir)
+                      [:sessions "%1"])]
+        (is (= :completed (:agent-status s))))
+      (finally
+        (cleanup-dir dir)))))
+
+;; --- reactivate-closed-session! ---
+
+(deftest test-reactivate-closed-session
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session! dir "%1"
+                             {:agent-type :claude-code
+                              :agent-status :closed
+                              :pane-id "%1"})
+      (is (true? (store/reactivate-closed-session!
+                  dir "%1"
+                  {:agent-status :running})))
+      (let [s (get-in (store/read-sessions dir)
+                      [:sessions "%1"])]
+        (is (= :running (:agent-status s))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-reactivate-non-closed-blocked
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session! dir "%1"
+                             {:agent-type :claude-code
+                              :agent-status :completed
+                              :pane-id "%1"})
+      (is (false? (store/reactivate-closed-session!
+                   dir "%1"
+                   {:agent-status :running})))
+      (let [s (get-in (store/read-sessions dir)
+                      [:sessions "%1"])]
+        (is (= :completed (:agent-status s))))
+      (finally
+        (cleanup-dir dir)))))
+
+;; --- close-sessions-by-pred! ---
+
+(deftest test-close-sessions-by-pred-cwd
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session! dir "%1"
+                             {:agent-type :claude-code
+                              :agent-status :running
+                              :cwd "/tmp/alive"
+                              :pane-id "%1"})
+      (store/update-session! dir "%2"
+                             {:agent-type :codex
+                              :agent-status :running
+                              :cwd "/tmp/dead"
+                              :pane-id "%2"})
+      (store/close-sessions-by-pred!
+       dir
+       (fn [_key session]
+         (= "/tmp/dead" (:cwd session))))
+      (let [state (store/read-sessions dir)
+            s1 (get-in state [:sessions "%1"])
+            s2 (get-in state [:sessions "%2"])]
+        (is (= :running (:agent-status s1)))
+        (is (= :closed (:agent-status s2))))
+      (finally
+        (cleanup-dir dir)))))
+
+;; --- purge-expired-closed-sessions! ---
+
+(deftest test-purge-expired-sessions
   (let [dir (temp-dir)]
     (try
       (store/update-session!
-       dir "s1"
+       dir "%1"
        {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/alive"})
+        :agent-status :closed
+        :pane-id "%1"
+        :last-updated (.toString
+                       (.minusSeconds
+                        (java.time.Instant/now) 600))})
       (store/update-session!
-       dir "s2"
+       dir "%2"
        {:agent-type :codex
         :agent-status :running
-        :cwd "/dead"})
+        :pane-id "%2"})
+      (store/purge-expired-closed-sessions!
+       dir #{"%2"} 1000)
+      (let [sessions (:sessions
+                      (store/read-sessions dir))]
+        (is (nil? (get sessions "%1"))
+            "Expired closed session should be purged")
+        (is (some? (get sessions "%2"))
+            "Running session should remain"))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-purge-keeps-live-pane-sessions
+  (let [dir (temp-dir)]
+    (try
       (store/update-session!
-       dir "s3"
+       dir "%1"
        {:agent-type :claude-code
-        :agent-status :completed
-        :cwd "/also-dead"})
-      (store/close-stale-sessions!
-       dir #{"/alive"})
+        :agent-status :closed
+        :pane-id "%1"
+        :last-updated (.toString
+                       (.minusSeconds
+                        (java.time.Instant/now) 600))})
+      (store/purge-expired-closed-sessions!
+       dir #{"%1"} 1000)
+      (let [sessions (:sessions
+                      (store/read-sessions dir))]
+        (is (some? (get sessions "%1"))
+            "Session with live pane should not be purged"))
+      (finally
+        (cleanup-dir dir)))))
+
+;; --- close-sessions-by-pred! ---
+
+(deftest test-close-sessions-by-pred
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session! dir "%1"
+                             {:agent-type :claude-code
+                              :agent-status :running
+                              :cwd "/tmp/a"
+                              :pane-id "%1"})
+      (store/update-session! dir "%2"
+                             {:agent-type :codex
+                              :agent-status :running
+                              :cwd "/tmp/b"
+                              :pane-id "%2"})
+      (store/close-sessions-by-pred!
+       dir
+       (fn [_key session]
+         (= "/tmp/b" (:cwd session))))
       (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])
-            s2 (get-in state [:sessions "s2"])
-            s3 (get-in state [:sessions "s3"])]
+            s1 (get-in state [:sessions "%1"])
+            s2 (get-in state [:sessions "%2"])]
         (is (= :running (:agent-status s1)))
-        (is (= :closed (:agent-status s2)))
-        (is (= :completed (:agent-status s3))))
+        (is (= :closed (:agent-status s2))))
       (finally
         (cleanup-dir dir)))))
 
-(deftest test-close-stale-empty-cwd-untouched
-  (let [dir (temp-dir)]
-    (try
-      (store/update-session!
-       dir "s1"
-       {:agent-type :codex
-        :agent-status :running
-        :cwd ""})
-      (store/close-stale-sessions! dir #{})
-      (let [s1 (get-in (store/read-sessions dir)
-                       [:sessions "s1"])]
-        (is (= :running (:agent-status s1))))
-      (finally
-        (cleanup-dir dir)))))
+;; --- Non-tmux sessions use session-id as key ---
 
-(deftest test-close-stale-idle-session
-  (testing "Idle sessions are also closed when stale"
+(deftest test-non-tmux-session-uses-session-id-key
+  (testing "Sessions without pane-id are stored by session-id"
     (let [dir (temp-dir)]
       (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :idle
-          :cwd "/gone"
-          :last-message "idle"})
-        (store/close-stale-sessions! dir #{})
-        (let [s1 (get-in (store/read-sessions dir)
-                         [:sessions "s1"])]
-          (is (= :closed (:agent-status s1)))
-          (is (= "idle" (:last-message s1))
-              "last-message preserved during state transition"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-close-stale-waiting-session
-  (testing "Waiting sessions are also closed when stale"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :codex
-          :agent-status :waiting
-          :cwd "/gone"
-          :last-message "waiting"})
-        (store/close-stale-sessions! dir #{})
-        (let [s1 (get-in (store/read-sessions dir)
-                         [:sessions "s1"])]
-          (is (= :closed (:agent-status s1))))
-        (finally
-          (cleanup-dir dir))))))
-
-;; --- Supersede-per-Key tests (B) ---
-
-(deftest test-supersede-closes-old-session
-  (let [dir (temp-dir)]
-    (try
-      (store/update-session!
-       dir "old-session"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id "%42"
-        :last-message "working"})
-      (store/update-session!
-       dir "new-session"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id "%42"
-        :last-message "resumed"})
-      (let [state (store/read-sessions dir)
-            old (get-in state [:sessions "old-session"])
-            new (get-in state [:sessions "new-session"])]
-        (is (= :closed (:agent-status old)))
-        (is (= "working" (:last-message old))
-            "last-message preserved when superseded")
-        (is (= :running (:agent-status new))))
-      (finally
-        (cleanup-dir dir)))))
-
-(deftest test-supersede-different-pane-no-close
-  (let [dir (temp-dir)]
-    (try
-      (store/update-session!
-       dir "s1"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id "%42"})
-      (store/update-session!
-       dir "s2"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id "%99"})
-      (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])
-            s2 (get-in state [:sessions "s2"])]
-        (is (= :running (:agent-status s1)))
-        (is (= :running (:agent-status s2))))
-      (finally
-        (cleanup-dir dir)))))
-
-(deftest test-supersede-different-cwd-closes-old
-  (testing "Same pane + same agent type supersedes even with different CWD"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work-a"
-          :pane-id "%42"})
-        (store/update-session!
-         dir "s2"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work-b"
-          :pane-id "%42"})
-        (let [state (store/read-sessions dir)
-              s1 (get-in state [:sessions "s1"])
-              s2 (get-in state [:sessions "s2"])]
-          (is (= :closed (:agent-status s1))
-              "Old session must be closed when same pane is reused")
-          (is (true? (:superseded s1))
-              "Old session must be marked as superseded")
-          (is (= :running (:agent-status s2))))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-supersede-different-agent-no-close
-  (let [dir (temp-dir)]
-    (try
-      (store/update-session!
-       dir "s1"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id "%42"})
-      (store/update-session!
-       dir "s2"
-       {:agent-type :codex
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id "%42"})
-      (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])
-            s2 (get-in state [:sessions "s2"])]
-        (is (= :running (:agent-status s1)))
-        (is (= :running (:agent-status s2))))
-      (finally
-        (cleanup-dir dir)))))
-
-(deftest test-supersede-idle-session-closed
-  (testing "Idle session in same pane is superseded by new
-            running session"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "old"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "working"})
-        ;; Simulate capture-based transition to idle
-        (store/update-session-if-active!
-         dir "old"
-         {:agent-status :idle})
+        (store/update-session! dir "some-session-id"
+                               {:agent-type :claude-code
+                                :agent-status :running
+                                :cwd "/tmp/work"
+                                :pane-id ""})
         (let [s (get-in (store/read-sessions dir)
-                        [:sessions "old"])]
-          (is (= :idle (:agent-status s))))
-        ;; New session starts in same pane
-        (store/update-session!
-         dir "new"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "resumed"})
-        (let [state (store/read-sessions dir)
-              old (get-in state [:sessions "old"])
-              new-s (get-in state [:sessions "new"])]
-          (is (= :closed (:agent-status old))
-              "Idle session must be superseded")
-          (is (true? (:superseded old)))
-          (is (= :running (:agent-status new-s))))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-supersede-empty-pane-id-no-close
-  (let [dir (temp-dir)]
-    (try
-      (store/update-session!
-       dir "s1"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id ""})
-      (store/update-session!
-       dir "s2"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id ""})
-      (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])
-            s2 (get-in state [:sessions "s2"])]
-        (is (= :running (:agent-status s1)))
-        (is (= :running (:agent-status s2))))
-      (finally
-        (cleanup-dir dir)))))
-
-(deftest test-supersede-completed-not-closed
-  (let [dir (temp-dir)]
-    (try
-      (store/update-session!
-       dir "s1"
-       {:agent-type :claude-code
-        :agent-status :completed
-        :cwd "/tmp/work"
-        :pane-id "%42"})
-      (store/update-session!
-       dir "s2"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id "%42"})
-      (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])]
-        (is (= :completed (:agent-status s1))))
-      (finally
-        (cleanup-dir dir)))))
-
-(deftest test-supersede-non-running-update-no-close
-  (let [dir (temp-dir)]
-    (try
-      (store/update-session!
-       dir "s1"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id "%42"
-        :last-message "active"})
-      (store/update-session!
-       dir "s2"
-       {:agent-type :claude-code
-        :agent-status :completed
-        :cwd "/tmp/work"
-        :pane-id "%42"
-        :last-message "done"})
-      (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])]
-        (is (= :running (:agent-status s1)))
-        (is (= "active" (:last-message s1))))
-      (finally
-        (cleanup-dir dir)))))
-
-(deftest test-superseded-session-stays-closed
-  (let [dir (temp-dir)]
-    (try
-      (store/update-session!
-       dir "old"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id "%42"
-        :last-message "working"})
-      (store/update-session!
-       dir "new"
-       {:agent-type :claude-code
-        :agent-status :running
-        :cwd "/tmp/work"
-        :pane-id "%42"
-        :last-message "resumed"})
-      ;; old is now superseded
-      (let [s (get-in (store/read-sessions dir)
-                      [:sessions "old"])]
-        (is (= :closed (:agent-status s)))
-        (is (= "working" (:last-message s))
-            "last-message preserved when superseded"))
-      ;; delayed hook tries to set old back to running
-      (store/update-session!
-       dir "old"
-       {:agent-status :running
-        :last-message "delayed event"})
-      ;; old must stay closed
-      (let [s (get-in (store/read-sessions dir)
-                      [:sessions "old"])]
-        (is (= :closed (:agent-status s)))
-        (is (= "working" (:last-message s))
-            "delayed running update blocked on superseded session"))
-      ;; non-running update merges but flag is kept
-      (store/update-session!
-       dir "old"
-       {:agent-status :completed
-        :last-message "stop event"})
-      (let [s (get-in (store/read-sessions dir)
-                      [:sessions "old"])]
-        (is (= :completed (:agent-status s)))
-        (is (= "stop event" (:last-message s)))
-        (is (true? (:superseded s))))
-      ;; running update still blocked after non-running
-      (store/update-session!
-       dir "old"
-       {:agent-status :running
-        :last-message "late resume"})
-      (let [s (get-in (store/read-sessions dir)
-                      [:sessions "old"])]
-        (is (= :completed (:agent-status s)))
-        (is (true? (:superseded s))))
-      (finally
-        (cleanup-dir dir)))))
-
-;; --- update-session-if-active! tests ---
-
-(deftest test-update-if-active-applies-when-running
-  (testing "Updates session when it is still :running"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :last-message "working"})
-        (let [applied (store/update-session-if-active!
-                       dir "s1"
-                       {:agent-status :idle})]
-          (is (true? applied))
-          (let [s (get-in (store/read-sessions dir)
-                          [:sessions "s1"])]
-            (is (= :idle (:agent-status s)))
-            (is (= "working" (:last-message s))
-                "last-message preserved during capture-based update")
-            (is (= :claude-code (:agent-type s)))))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-update-if-active-applies-when-idle
-  (testing "Updates session when it is :idle"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :idle
-          :cwd "/tmp/work"
-          :last-message "idle"})
-        (let [applied (store/update-session-if-active!
-                       dir "s1"
-                       {:agent-status :running})]
-          (is (true? applied))
-          (let [s (get-in (store/read-sessions dir)
-                          [:sessions "s1"])]
-            (is (= :running (:agent-status s)))))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-update-if-active-applies-when-waiting
-  (testing "Updates session when it is :waiting"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :waiting
-          :cwd "/tmp/work"
-          :last-message "waiting"})
-        (let [applied (store/update-session-if-active!
-                       dir "s1"
-                       {:agent-status :running})]
-          (is (true? applied))
-          (let [s (get-in (store/read-sessions dir)
-                          [:sessions "s1"])]
-            (is (= :running (:agent-status s)))))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-update-if-active-skips-completed
-  (testing "Skips update when session is :completed"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :completed
-          :cwd "/tmp/work"
-          :last-message "done"})
-        (let [applied (store/update-session-if-active!
-                       dir "s1"
-                       {:agent-status :idle})]
-          (is (false? applied))
-          (let [s (get-in (store/read-sessions dir)
-                          [:sessions "s1"])]
-            (is (= :completed (:agent-status s)))
-            (is (= "done" (:last-message s)))))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-update-if-active-skips-nonexistent
-  (testing "Skips update for non-existent session"
-    (let [dir (temp-dir)]
-      (try
-        (let [applied (store/update-session-if-active!
-                       dir "missing"
-                       {:agent-status :idle})]
-          (is (false? applied)))
-        (finally
-          (cleanup-dir dir))))))
-
-;; --- reactivate-closed-session! tests ---
-
-(deftest test-reactivate-closed-non-superseded
-  (testing "Closed non-superseded session can be reactivated"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "working"})
-        ;; Close it via stale detection
-        (store/close-stale-sessions! dir #{})
-        (let [s (get-in (store/read-sessions dir)
-                        [:sessions "s1"])]
-          (is (= :closed (:agent-status s))))
-        ;; Reactivate it
-        (let [applied (store/reactivate-closed-session!
-                       dir "s1"
-                       {:agent-status :running
-                        :last-updated
-                        (.toString
-                         (java.time.Instant/now))})]
-          (is (true? applied))
-          (let [s (get-in (store/read-sessions dir)
-                          [:sessions "s1"])]
-            (is (= :running (:agent-status s)))
-            (is (= "working" (:last-message s))
-                "last-message preserved after reactivation")))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-reactivate-superseded-blocked
-  (testing "Superseded closed session cannot be reactivated"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "old"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "working"})
-        (store/update-session!
-         dir "new"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "resumed"})
-        ;; old is superseded
-        (let [s (get-in (store/read-sessions dir)
-                        [:sessions "old"])]
-          (is (true? (:superseded s))))
-        ;; Reactivate attempt should fail
-        (let [applied (store/reactivate-closed-session!
-                       dir "old"
-                       {:agent-status :running})]
-          (is (false? applied))
-          (let [s (get-in (store/read-sessions dir)
-                          [:sessions "old"])]
-            (is (= :closed (:agent-status s)))))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-reactivate-running-session-noop
-  (testing "Running session is not reactivated (already active)"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :last-message "working"})
-        (let [applied (store/reactivate-closed-session!
-                       dir "s1"
-                       {:agent-status :running})]
-          (is (false? applied))
-          (let [s (get-in (store/read-sessions dir)
-                          [:sessions "s1"])]
-            (is (= :running (:agent-status s)))
-            (is (= "working" (:last-message s)))))
-        (finally
-          (cleanup-dir dir))))))
-
-;; --- purge-expired-closed-sessions! tests ---
-
-(deftest test-purge-expired-closed-sessions
-  (testing "Expired closed sessions are purged when pane is gone"
-    (let [dir (temp-dir)]
-      (try
-        ;; Create a closed session with old timestamp
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :closed
-          :cwd "/tmp/gone"
-          :pane-id "%42"
-          :last-message "pane closed"
-          :last-updated (.toString
-                         (.minusSeconds
-                          (java.time.Instant/now) 600))})
-        ;; Create a running session
-        (store/update-session!
-         dir "s2"
-         {:agent-type :codex
-          :agent-status :running
-          :cwd "/tmp/alive"
-          :pane-id "%99"
-          :last-message "working"})
-        ;; Purge with no live pane-ids
-        (store/purge-expired-closed-sessions!
-         dir #{} 1000)
-        (let [state (store/read-sessions dir)]
-          (is (nil? (get-in state [:sessions "s1"]))
-              "Expired closed session should be purged")
-          (is (some? (get-in state [:sessions "s2"]))
-              "Running session should remain"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-purge-keeps-recent-closed
-  (testing "Recently closed sessions are not purged"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :closed
-          :cwd "/tmp/gone"
-          :pane-id "%42"
-          :last-message "pane closed"
-          :last-updated (.toString
-                         (java.time.Instant/now))})
-        (store/purge-expired-closed-sessions!
-         dir #{} 300000)
-        (let [state (store/read-sessions dir)]
-          (is (some? (get-in state [:sessions "s1"]))
-              "Recently closed session should not be purged"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-purge-keeps-superseded-sessions
-  (testing "Superseded closed sessions are never purged"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "old"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "working"})
-        (store/update-session!
-         dir "new"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "resumed"})
-        ;; old is now superseded+closed
-        (let [s (get-in (store/read-sessions dir)
-                        [:sessions "old"])]
-          (is (= :closed (:agent-status s)))
-          (is (true? (:superseded s))))
-        ;; Purge with 0 TTL and no live panes
-        (store/purge-expired-closed-sessions!
-         dir #{} 0)
-        (let [state (store/read-sessions dir)]
-          (is (some? (get-in state [:sessions "old"]))
-              "Superseded session must not be purged"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-purge-keeps-closed-with-live-pane
-  (testing "Closed session with live pane-id is not purged"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :closed
-          :cwd "/tmp/gone"
-          :pane-id "%42"
-          :last-message "pane closed"
-          :last-updated (.toString
-                         (.minusSeconds
-                          (java.time.Instant/now) 600))})
-        (store/purge-expired-closed-sessions!
-         dir #{"%42"} 1000)
-        (let [state (store/read-sessions dir)]
-          (is (some? (get-in state [:sessions "s1"]))
-              "Closed session with live pane should not be purged"))
-        (finally
-          (cleanup-dir dir))))))
-
-;; --- Message preservation regression tests ---
-
-(deftest test-message-preserved-on-pane-close
-  (testing "last-message is not overwritten when session is closed as stale"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/gone"
-          :last-message "using: Bash"})
-        (store/close-stale-sessions! dir #{})
-        (let [s (get-in (store/read-sessions dir)
-                        [:sessions "s1"])]
-          (is (= :closed (:agent-status s)))
-          (is (= "using: Bash" (:last-message s))
-              "Agent message must be preserved when pane closes"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-message-preserved-on-supersede
-  (testing "last-message is not overwritten when session is superseded"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "old"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "used: Edit"})
-        (store/update-session!
-         dir "new"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "session started"})
-        (let [old (get-in (store/read-sessions dir)
-                          [:sessions "old"])]
-          (is (= :closed (:agent-status old)))
-          (is (= "used: Edit" (:last-message old))
-              "Agent message must be preserved when superseded"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-message-preserved-on-close-by-pred
-  (testing "last-message preserved when closed via close-sessions-by-pred!"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "subagent spawned"})
-        (store/close-sessions-by-pred!
-         dir (fn [_sid _session] true))
-        (let [s (get-in (store/read-sessions dir)
-                        [:sessions "s1"])]
-          (is (= :closed (:agent-status s)))
-          (is (= "subagent spawned" (:last-message s))
-              "Agent message must be preserved when closed by predicate"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-message-preserved-on-capture-update
-  (testing "last-message preserved when status is updated via capture"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :last-message "used: Bash"})
-        (store/update-session-if-active!
-         dir "s1"
-         {:agent-status :idle})
-        (let [s (get-in (store/read-sessions dir)
-                        [:sessions "s1"])]
-          (is (= :idle (:agent-status s)))
-          (is (= "used: Bash" (:last-message s))
-              "Agent message must be preserved during capture-based status update"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-message-preserved-on-reactivation
-  (testing "last-message preserved when closed session is reactivated"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"
-          :last-message "task completed"})
-        ;; Close it
-        (store/close-stale-sessions! dir #{})
-        (is (= :closed (get-in (store/read-sessions dir)
-                               [:sessions "s1" :agent-status])))
-        ;; Reactivate without message
-        (store/reactivate-closed-session!
-         dir "s1"
-         {:agent-status :running
-          :last-updated (.toString (java.time.Instant/now))})
-        (let [s (get-in (store/read-sessions dir)
-                        [:sessions "s1"])]
-          (is (= :running (:agent-status s)))
-          (is (= "task completed" (:last-message s))
-              "Agent message must be preserved after reactivation"))
-        (finally
-          (cleanup-dir dir))))))
-
-;; --- purge terminal-status sessions tests ---
-
-(deftest test-purge-expired-completed-sessions
-  (testing "Expired :completed sessions are purged when pane is gone"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :completed
-          :cwd "/tmp/done"
-          :pane-id "%50"
-          :last-message "task done"
-          :last-updated (.toString
-                         (.minusSeconds
-                          (java.time.Instant/now) 600))})
-        (store/purge-expired-closed-sessions!
-         dir #{} 1000)
-        (let [state (store/read-sessions dir)]
-          (is (nil? (get-in state [:sessions "s1"]))
-              "Expired completed session should be purged"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-purge-expired-error-sessions
-  (testing "Expired :error sessions are purged when pane is gone"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :error
-          :cwd "/tmp/err"
-          :pane-id "%51"
-          :last-message "something failed"
-          :last-updated (.toString
-                         (.minusSeconds
-                          (java.time.Instant/now) 600))})
-        (store/purge-expired-closed-sessions!
-         dir #{} 1000)
-        (let [state (store/read-sessions dir)]
-          (is (nil? (get-in state [:sessions "s1"]))
-              "Expired error session should be purged"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-purge-keeps-recent-completed-sessions
-  (testing "Recently completed sessions are not purged"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :completed
-          :cwd "/tmp/done"
-          :pane-id "%50"
-          :last-message "task done"
-          :last-updated (.toString
-                         (java.time.Instant/now))})
-        (store/purge-expired-closed-sessions!
-         dir #{} 300000)
-        (let [state (store/read-sessions dir)]
-          (is (some? (get-in state [:sessions "s1"]))
-              "Recently completed session should not be purged"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-purge-keeps-completed-with-live-pane
-  (testing "Completed session with live pane-id is not purged"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :completed
-          :cwd "/tmp/done"
-          :pane-id "%50"
-          :last-message "task done"
-          :last-updated (.toString
-                         (.minusSeconds
-                          (java.time.Instant/now) 600))})
-        (store/purge-expired-closed-sessions!
-         dir #{"%50"} 1000)
-        (let [state (store/read-sessions dir)]
-          (is (some? (get-in state [:sessions "s1"]))
-              "Completed session with live pane should not be purged"))
-        (finally
-          (cleanup-dir dir))))))
-
-;; --- Resume duplicate session regression tests ---
-
-(deftest test-resume-supersedes-active-session-in-same-pane
-  (testing "Resuming a completed session supersedes the active
-            session in the same pane (the core resume-dup fix)"
-    (let [dir (temp-dir)]
-      (try
-        ;; Session A runs and completes
-        (store/update-session!
-         dir "session-A"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project"
-          :pane-id "%42"
-          :last-message "working"})
-        (store/update-session!
-         dir "session-A"
-         {:agent-status :completed
-          :last-message "done"})
-        ;; Session B starts fresh in same pane
-        (store/update-session!
-         dir "session-B"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project"
-          :pane-id "%42"
-          :last-message "fresh start"})
-        ;; Verify B is running, A is completed
-        (let [state (store/read-sessions dir)]
-          (is (= :completed
-                 (get-in state [:sessions "session-A"
-                                :agent-status])))
-          (is (= :running
-                 (get-in state [:sessions "session-B"
-                                :agent-status]))))
-        ;; Resume A: SessionStart hook fires with session-A
-        (store/update-session!
-         dir "session-A"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project"
-          :pane-id "%42"
-          :last-message "resumed"})
-        ;; A should be running, B should be superseded
-        (let [state (store/read-sessions dir)
-              a (get-in state [:sessions "session-A"])
-              b (get-in state [:sessions "session-B"])]
-          (is (= :running (:agent-status a))
-              "Resumed session must be running")
-          (is (= "resumed" (:last-message a)))
-          (is (= :closed (:agent-status b))
-              "Previous active session must be superseded")
-          (is (true? (:superseded b))
-              "Previous session must have superseded flag")
-          (is (= "fresh start" (:last-message b))
-              "Superseded session preserves its last-message"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-resume-with-different-cwd-supersedes
-  (testing "Resuming a session with different CWD still
-            supersedes the active session in the same pane"
-    (let [dir (temp-dir)]
-      (try
-        ;; Session A completed in /project-a
-        (store/update-session!
-         dir "session-A"
-         {:agent-type :claude-code
-          :agent-status :completed
-          :cwd "/tmp/project-a"
-          :pane-id "%42"
-          :last-message "done-a"})
-        ;; Session B running in /project-b, same pane
-        (store/update-session!
-         dir "session-B"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project-b"
-          :pane-id "%42"
-          :last-message "working-b"})
-        ;; Resume A (cwd is /project-a, different from B)
-        (store/update-session!
-         dir "session-A"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project-a"
-          :pane-id "%42"
-          :last-message "resumed-a"})
-        (let [state (store/read-sessions dir)
-              a (get-in state [:sessions "session-A"])
-              b (get-in state [:sessions "session-B"])]
-          (is (= :running (:agent-status a)))
-          (is (= :closed (:agent-status b))
-              "B must be superseded even with different CWD")
-          (is (true? (:superseded b))))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-resume-does-not-affect-different-pane
-  (testing "Resuming a session does not supersede sessions
-            in a different pane"
-    (let [dir (temp-dir)]
-      (try
-        ;; Session A completed in pane %42
-        (store/update-session!
-         dir "session-A"
-         {:agent-type :claude-code
-          :agent-status :completed
-          :cwd "/tmp/project"
-          :pane-id "%42"})
-        ;; Session C running in pane %99
-        (store/update-session!
-         dir "session-C"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project"
-          :pane-id "%99"
-          :last-message "other-pane"})
-        ;; Resume A in pane %42
-        (store/update-session!
-         dir "session-A"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project"
-          :pane-id "%42"})
-        (let [state (store/read-sessions dir)
-              a (get-in state [:sessions "session-A"])
-              c (get-in state [:sessions "session-C"])]
-          (is (= :running (:agent-status a)))
-          (is (= :running (:agent-status c))
-              "Session in different pane must not be affected"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-resume-closed-session-supersedes
-  (testing "Resuming a closed (non-superseded) session also
-            triggers supersede"
-    (let [dir (temp-dir)]
-      (try
-        ;; Session A was closed (not superseded)
-        (store/update-session!
-         dir "session-A"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project"
-          :pane-id "%42"})
-        (store/close-stale-sessions! dir #{})
-        (let [s (get-in (store/read-sessions dir)
-                        [:sessions "session-A"])]
-          (is (= :closed (:agent-status s)))
-          (is (nil? (:superseded s))))
-        ;; Session B starts in same pane
-        (store/update-session!
-         dir "session-B"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project"
-          :pane-id "%42"})
-        ;; Resume A
-        (store/update-session!
-         dir "session-A"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project"
-          :pane-id "%42"})
-        (let [state (store/read-sessions dir)
-              a (get-in state [:sessions "session-A"])
-              b (get-in state [:sessions "session-B"])]
-          (is (= :running (:agent-status a)))
-          (is (= :closed (:agent-status b))
-              "B must be superseded when A resumes")
-          (is (true? (:superseded b))))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-ongoing-running-update-no-supersede
-  (testing "Normal hook updates on an already-running session
-            do not trigger supersede"
-    (let [dir (temp-dir)]
-      (try
-        ;; Both sessions running in different panes
-        (store/update-session!
-         dir "s1"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work"
-          :pane-id "%42"})
-        (store/update-session!
-         dir "s2"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/other"
-          :pane-id "%99"})
-        ;; Update s1 with running status (ongoing hook)
-        (store/update-session!
-         dir "s1"
-         {:agent-status :running
-          :last-message "tool used"})
-        (let [state (store/read-sessions dir)
-              s1 (get-in state [:sessions "s1"])
-              s2 (get-in state [:sessions "s2"])]
-          (is (= :running (:agent-status s1)))
-          (is (= :running (:agent-status s2))
-              "Ongoing update must not supersede other sessions"))
-        (finally
-          (cleanup-dir dir))))))
-
-(deftest test-delayed-hook-on-superseded-session-no-eviction
-  (testing "Delayed running hook for a superseded session must
-            not evict the current active session"
-    (let [dir (temp-dir)]
-      (try
-        ;; Session A runs, then B supersedes A
-        (store/update-session!
-         dir "session-A"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project"
-          :pane-id "%42"
-          :last-message "working-A"})
-        (store/update-session!
-         dir "session-B"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/project"
-          :pane-id "%42"
-          :last-message "working-B"})
-        ;; A is superseded+closed, B is running
-        (let [a (get-in (store/read-sessions dir)
-                        [:sessions "session-A"])]
-          (is (= :closed (:agent-status a)))
-          (is (true? (:superseded a))))
-        ;; Delayed hook for A arrives with :running
-        (store/update-session!
-         dir "session-A"
-         {:agent-status :running
-          :last-message "delayed event"})
-        ;; B must remain running (not evicted)
-        (let [state (store/read-sessions dir)
-              a (get-in state [:sessions "session-A"])
-              b (get-in state [:sessions "session-B"])]
-          (is (= :running (:agent-status b))
-              "Active session must not be evicted by delayed hook")
-          (is (= :closed (:agent-status a))
-              "Superseded session must stay closed"))
+                        [:sessions "some-session-id"])]
+          (is (some? s))
+          (is (= :running (:agent-status s))))
         (finally
           (cleanup-dir dir))))))

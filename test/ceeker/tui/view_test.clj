@@ -129,7 +129,7 @@
 
 (deftest test-card-message-lines-single-line
   (testing "short message produces single card line"
-    (let [lines (#'view/card-message-lines "hello" 20 "" "")]
+    (let [lines (#'view/card-message-lines "hello" 20)]
       (is (= 1 (count lines)))
       (is (str/starts-with? (first lines) "  │ "))
       (is (str/includes? (first lines) "hello")))))
@@ -137,14 +137,14 @@
 (deftest test-card-message-lines-multiline-wrap
   (testing "long message wraps into multiple card lines"
     (let [lines (#'view/card-message-lines
-                 "abcdefghijklmnopqrst" 10 "" "")]
+                 "abcdefghijklmnopqrst" 10)]
       (is (= 2 (count lines)))
       (is (every? #(str/starts-with? % "  │ ") lines)))))
 
 (deftest test-card-message-lines-cjk-wrap
   (testing "CJK message wraps by display width"
     (let [lines (#'view/card-message-lines
-                 "日本語のテスト文字列です" 10 "" "")]
+                 "日本語のテスト文字列です" 10)]
       (is (> (count lines) 1))
       (is (every? #(str/starts-with? % "  │ ") lines)))))
 
@@ -152,7 +152,7 @@
   (testing "CJK message lines stay within content-width"
     (let [cw 12
           msg "日本語のテスト文字列ですがとても長い"
-          lines (#'view/card-message-lines msg cw "" "")]
+          lines (#'view/card-message-lines msg cw)]
       (doseq [line lines]
         (let [content (subs line 4)]
           (is (<= (#'view/str-display-width content) cw)
@@ -161,34 +161,34 @@
 (deftest test-card-message-lines-max-lines
   (testing "message is limited to max-card-message-lines"
     (let [long-msg (apply str (repeat 200 "a"))
-          lines (#'view/card-message-lines long-msg 10 "" "")]
+          lines (#'view/card-message-lines long-msg 10)]
       (is (= view/max-card-message-lines (count lines)))))
   (testing "truncated last line ends with ellipsis"
     (let [long-msg (apply str (repeat 200 "a"))
-          lines (#'view/card-message-lines long-msg 10 "" "")
+          lines (#'view/card-message-lines long-msg 10)
           last-line (last lines)]
       (is (str/ends-with? last-line "…")))))
 
 (deftest test-card-message-lines-newline-normalized
   (testing "newlines in message are replaced with spaces"
     (let [lines (#'view/card-message-lines
-                 "line1\nline2" 30 "" "")]
+                 "line1\nline2" 30)]
       (is (= 1 (count lines)))
       (is (str/includes? (first lines) "line1 line2")))))
 
 (deftest test-card-message-lines-nil-message
   (testing "nil message produces single empty card line"
-    (let [lines (#'view/card-message-lines nil 20 "" "")]
+    (let [lines (#'view/card-message-lines nil 20)]
       (is (= 1 (count lines)))
       (is (str/starts-with? (first lines) "  │ ")))))
 
 ;; -- format-session-card integration tests --
 
 (defn- make-session [msg]
-  {:session-id "test123"
-   :agent-type :claude-code
+  {:agent-type :claude-code
    :agent-status :running
    :cwd "/home/user/project"
+   :pane-id "%42"
    :last-message msg
    :last-updated "2025-01-01T12:34:56.000Z"})
 
@@ -198,18 +198,28 @@
 (deftest test-format-session-card-single-line
   (testing "card with short message has correct structure"
     (let [card (#'view/format-session-card
-                (make-session "short msg") false 0 60)
+                (make-session "short msg") false 60)
           lines (str/split card #"\n")]
       (is (str/includes? (first lines) "┌"))
       (is (str/includes? (last lines) "└"))
       (is (some #(str/includes? % "short msg") lines)))))
+
+(deftest test-format-session-card-no-session-id
+  (testing "card does not display session-id"
+    (let [session (assoc (make-session "msg")
+                         :session-id "should-not-appear")
+          card (#'view/format-session-card
+                session false 60)
+          plain (strip-ansi card)]
+      (is (not (str/includes? plain "should-not-appear"))
+          "Session-id must not appear in card display"))))
 
 (deftest test-format-session-card-cjk-long-message
   (testing "CJK long message stays within card width"
     (let [width 40
           msg "日本語の長いメッセージがカード表示で枠を貫通しないことを確認するテスト"
           card (#'view/format-session-card
-                (make-session msg) false 0 width)
+                (make-session msg) false width)
           lines (str/split card #"\n")
           content-width (- width 4)]
       (is (str/includes? (first lines) "┌"))
@@ -227,7 +237,7 @@
   (testing "message with newlines renders correctly"
     (let [msg "first line\nsecond line\nthird line"
           card (#'view/format-session-card
-                (make-session msg) false 0 60)
+                (make-session msg) false 60)
           lines (str/split card #"\n")
           plain-lines (mapv strip-ansi lines)]
       (is (str/includes? (first plain-lines) "┌"))
@@ -242,7 +252,7 @@
 (deftest test-format-session-card-selection-highlight-header-only
   (testing "selected card applies reverse video only to header row (line1)"
     (let [card (#'view/format-session-card
-                (make-session "some message") true 0 60)
+                (make-session "some message") true 60)
           lines (str/split card #"\n")
           reverse-code "\033[7m"]
       (is (str/includes? (first lines) reverse-code)
@@ -253,7 +263,7 @@
                  (pr-str (strip-ansi line)))))))
   (testing "unselected card has no reverse video on any line"
     (let [card (#'view/format-session-card
-                (make-session "some message") false 0 60)
+                (make-session "some message") false 60)
           lines (str/split card #"\n")
           reverse-code "\033[7m"]
       (doseq [line lines]
@@ -261,32 +271,15 @@
             (str "unselected card line should not contain ansi-reverse: "
                  (pr-str (strip-ansi line))))))))
 
-(deftest test-card-line1-highlight-excludes-border
-  (testing "selected card header: left border is NOT highlighted"
+(deftest test-card-line1-no-session-id
+  (testing "card header line does not contain session-id"
     (let [card (#'view/format-session-card
-                (make-session "msg") true 0 60)
+                (assoc (make-session "msg")
+                       :session-id "test123") true 60)
           line1 (first (str/split card #"\n"))
-          reverse-code "\033[7m"
-          ;; Find the position of the reverse code and the border
-          rev-idx (str/index-of line1 reverse-code)
-          border-idx (str/index-of line1 "┌")]
-      (is (some? rev-idx)
-          "line1 must contain ansi-reverse")
-      (is (some? border-idx)
-          "line1 must contain border character ┌")
-      (is (> rev-idx border-idx)
-          "ansi-reverse must appear AFTER the border character ┌")))
-  (testing "selected card header: session id gets highlighted"
-    (let [card (#'view/format-session-card
-                (make-session "msg") true 0 60)
-          line1 (first (str/split card #"\n"))
-          reverse-code "\033[7m"
-          rev-idx (str/index-of line1 reverse-code)
-          id-idx (str/index-of line1 "test123")]
-      (is (some? rev-idx))
-      (is (some? id-idx))
-      (is (< rev-idx id-idx)
-          "ansi-reverse must appear BEFORE the session id"))))
+          plain (strip-ansi line1)]
+      (is (not (str/includes? plain "test123"))
+          "Session-id should not appear in card header"))))
 
 ;; -- normalize-message tests --
 
@@ -318,19 +311,27 @@
 
 ;; -- format-session-line tests (table display) --
 
+(deftest test-format-session-line-no-session-id
+  (testing "table row does not contain session-id"
+    (let [session (assoc (make-session "msg")
+                         :session-id "should-not-appear")
+          line (#'view/format-session-line session false)
+          plain (strip-ansi line)]
+      (is (not (str/includes? plain "should-not-appear"))
+          "Session-id must not appear in table row"))))
+
 (deftest test-format-session-line-no-newlines
   (testing "table row with newlines in message renders as single line"
     (let [session (make-session "line1\nline2\nline3")
-          line (#'view/format-session-line session false 0)
+          line (#'view/format-session-line session false)
           plain (strip-ansi line)]
-      (is (not (str/includes? plain "\n"))
-          "Table row must not contain newline characters")
+      (is (not (str/includes? plain "\n")))
       (is (str/includes? plain "line1 line2 line3")))))
 
 (deftest test-format-session-line-crlf
   (testing "table row with CRLF in message renders as single line"
     (let [session (make-session "first\r\nsecond")
-          line (#'view/format-session-line session false 0)
+          line (#'view/format-session-line session false)
           plain (strip-ansi line)]
       (is (not (str/includes? plain "\n")))
       (is (str/includes? plain "first second")))))
@@ -338,16 +339,15 @@
 (deftest test-format-session-line-cjk-message
   (testing "table row with CJK message truncates by display width"
     (let [session (make-session "日本語の長いメッセージがテーブル表示で適切に切り詰められることを確認")
-          line (#'view/format-session-line session false 0)
+          line (#'view/format-session-line session false)
           plain (strip-ansi line)]
       (is (not (str/includes? plain "\n")))
-      (is (str/includes? plain "…")
-          "Long CJK message should be truncated with ellipsis"))))
+      (is (str/includes? plain "…")))))
 
 (deftest test-format-session-line-short-message
   (testing "table row with short message has no truncation"
     (let [session (make-session "short msg")
-          line (#'view/format-session-line session false 0)
+          line (#'view/format-session-line session false)
           plain (strip-ansi line)]
       (is (not (str/includes? plain "\n")))
       (is (str/includes? plain "short msg")))))
@@ -355,7 +355,7 @@
 (deftest test-format-session-line-nil-message
   (testing "table row with nil message renders without error"
     (let [session (make-session nil)
-          line (#'view/format-session-line session false 0)
+          line (#'view/format-session-line session false)
           plain (strip-ansi line)]
       (is (not (str/includes? plain "\n"))))))
 
@@ -387,26 +387,25 @@
 ;; -- table column alignment tests --
 
 (deftest test-table-columns-aligned
-  (testing "all session rows have same column positions as header"
+  (testing "all session rows have consistent column structure"
     (let [sessions [(assoc (make-session "msg one")
                            :agent-type :claude-code
                            :agent-status :running)
                     (assoc (make-session "msg two")
-                           :session-id "short"
                            :agent-type :codex
                            :agent-status :closed)
                     (assoc (make-session "日本語メッセージ")
-                           :session-id "cjk-session"
                            :agent-type :claude-code
                            :agent-status :waiting)]
           header (#'view/column-headers)
           header-plain (strip-ansi header)
-          lines (map #(#'view/format-session-line % false 0)
+          lines (map #(#'view/format-session-line % false)
                      sessions)]
-      (is (>= (count (str/split (str/trim header-plain)
-                                #"\s{2,}"))
-              5)
-          "Header should have at least 5 columns")
+      (is (not (str/includes? header-plain "SESSION"))
+          "Header should not have SESSION column")
+      (is (str/includes? header-plain "AGENT"))
+      (is (str/includes? header-plain "STATUS"))
+      (is (str/includes? header-plain "WORKTREE"))
       (doseq [line lines]
         (is (not (str/includes? (strip-ansi line) "\n")))))))
 
@@ -420,20 +419,17 @@
                          :agent-status :running)
           line-claude (strip-ansi
                        (#'view/format-session-line
-                        s-claude false 0))
+                        s-claude false))
           line-codex (strip-ansi
                       (#'view/format-session-line
-                       s-codex false 0))
-          ;; Find position of STATUS column content
-          ;; (Running appears after AGENT badge)
+                       s-codex false))
           claude-running-pos (str/index-of
                               line-claude "Running")
           codex-running-pos (str/index-of
                              line-codex "Running")]
       (is (some? claude-running-pos))
       (is (some? codex-running-pos))
-      (is (= claude-running-pos codex-running-pos)
-          "STATUS column should start at same position regardless of agent type"))))
+      (is (= claude-running-pos codex-running-pos)))))
 
 (deftest test-table-columns-aligned-different-statuses
   (testing "different status badges produce same WORKTREE column offset"
@@ -444,14 +440,20 @@
                                       :agent-status status)]
                          (strip-ansi
                           (#'view/format-session-line
-                           s false 0))))
+                           s false))))
                      statuses)
-          ;; Find the position of "project" (cwd-short-name)
           positions (map #(str/index-of % "project") lines)]
-      (is (every? some? positions)
-          "All lines should contain the worktree name")
-      (is (apply = positions)
-          "WORKTREE column should start at same position for all statuses"))))
+      (is (every? some? positions))
+      (is (apply = positions)))))
+
+;; -- header line uses "pane(s)" instead of "session(s)" --
+
+(deftest test-header-says-panes
+  (testing "header uses pane(s) not session(s)"
+    (let [sessions [(make-session "msg")]
+          output (view/render sessions 0)]
+      (is (str/includes? output "pane(s)"))
+      (is (not (str/includes? output "session(s)"))))))
 
 ;; -- format-time timezone tests --
 
@@ -459,14 +461,12 @@
   (testing "UTC timestamp is converted to local timezone"
     (let [utc-ts "2025-06-15T03:30:45.000Z"
           result (#'view/format-time utc-ts)
-          ;; Compute expected value using the same logic
           expected (-> (Instant/parse utc-ts)
                        (.atZone (ZoneId/systemDefault))
                        (.format (DateTimeFormatter/ofPattern
                                  "HH:mm:ss")))]
       (is (= expected result))
-      (is (re-matches #"\d{2}:\d{2}:\d{2}" result)
-          "Result should be HH:mm:ss format"))))
+      (is (re-matches #"\d{2}:\d{2}:\d{2}" result)))))
 
 (deftest test-format-time-nil-and-short
   (testing "nil returns empty string"

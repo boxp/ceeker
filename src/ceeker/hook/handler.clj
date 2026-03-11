@@ -1,6 +1,8 @@
 (ns ceeker.hook.handler
   "Hook event handler for Claude Code and Codex.
-   Normalizes hook payloads and writes to State Store."
+   Normalizes hook payloads and writes to State Store.
+   Uses pane-id as store key when available, falling back
+   to session-id for non-tmux sessions."
   (:require [ceeker.state.store :as store]
             [ceeker.tmux.pane :as pane]
             [cheshire.core :as json]
@@ -144,6 +146,16 @@
       (:hook_event_name payload)
       "Notification"))
 
+(defn- store-key
+  "Returns the store key for a session.
+   Uses pane-id when available (tmux), falls back to
+   session-id for non-tmux sessions."
+  [session-data]
+  (let [pane-id (:pane-id session-data)]
+    (if (seq pane-id)
+      pane-id
+      (:session-id session-data))))
+
 (defn handle-hook!
   "Handles a hook event: parses, normalizes, writes to store."
   ([agent-type event-type stdin-input]
@@ -159,11 +171,11 @@
          session-data (normalize-event
                        agent-type effective-event
                        payload)
-         session-id (:session-id session-data)]
+         key (store-key session-data)]
      (if state-dir
        (store/update-session!
-        state-dir session-id session-data)
+        state-dir key session-data)
        (store/update-session!
-        session-id session-data))
+        key session-data))
      (pane/close-stale-sessions! state-dir)
      session-data)))

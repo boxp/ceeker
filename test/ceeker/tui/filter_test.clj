@@ -3,25 +3,25 @@
             [clojure.test :refer [deftest is testing]]))
 
 (def sample-sessions
-  [{:session-id "s1"
-    :agent-type :claude-code
+  [{:agent-type :claude-code
     :agent-status :running
     :cwd "/home/user/project-a"
+    :pane-id "%1"
     :last-message "Working"}
-   {:session-id "s2"
-    :agent-type :codex
+   {:agent-type :codex
     :agent-status :completed
     :cwd "/home/user/project-b"
+    :pane-id "%2"
     :last-message "Done"}
-   {:session-id "s3"
-    :agent-type :claude-code
+   {:agent-type :claude-code
     :agent-status :error
     :cwd "/home/user/project-c"
+    :pane-id "%3"
     :last-message "Failed"}
-   {:session-id "s4"
-    :agent-type :codex
+   {:agent-type :codex
     :agent-status :running
     :cwd "/home/user/project-d"
+    :pane-id "%4"
     :last-message "Active"}])
 
 (deftest test-empty-filter
@@ -61,21 +61,21 @@
                     :status-filter :completed)
           result (f/apply-filters fs sample-sessions)]
       (is (= 1 (count result)))
-      (is (= "s2" (:session-id (first result)))))))
+      (is (= "%2" (:pane-id (first result)))))))
 
 (deftest test-search-filter
-  (testing "search by session-id"
-    (let [fs (f/set-search-query f/empty-filter "s1")
+  (testing "search by pane-id"
+    (let [fs (f/set-search-query f/empty-filter "%1")
           result (f/apply-filters fs sample-sessions)]
       (is (= 1 (count result)))
-      (is (= "s1" (:session-id (first result))))))
+      (is (= "%1" (:pane-id (first result))))))
 
   (testing "search by cwd substring"
     (let [fs (f/set-search-query f/empty-filter
                                  "project-b")
           result (f/apply-filters fs sample-sessions)]
       (is (= 1 (count result)))
-      (is (= "s2" (:session-id (first result))))))
+      (is (= "%2" (:pane-id (first result))))))
 
   (testing "case-insensitive search"
     (let [fs (f/set-search-query f/empty-filter
@@ -90,7 +90,7 @@
               :search-query nil}
           result (f/apply-filters fs sample-sessions)]
       (is (= 1 (count result)))
-      (is (= "s1" (:session-id (first result))))))
+      (is (= "%1" (:pane-id (first result))))))
 
   (testing "agent + search filter"
     (let [fs {:agent-filter :codex
@@ -98,7 +98,7 @@
               :search-query "project-d"}
           result (f/apply-filters fs sample-sessions)]
       (is (= 1 (count result)))
-      (is (= "s4" (:session-id (first result)))))))
+      (is (= "%4" (:pane-id (first result)))))))
 
 (deftest test-toggle-agent-filter
   (testing "cycles through agent filters"
@@ -193,9 +193,8 @@
       (is (nil? (:agent-filter f0)))
       (is (= :claude-code (:agent-filter f1)))
       (is (= :codex (:agent-filter f2)))
-      (is (nil? (:agent-filter f3)) "wraps back to nil")
-      (is (= :claude-code (:agent-filter f4))
-          "second cycle starts correctly"))))
+      (is (nil? (:agent-filter f3)))
+      (is (= :claude-code (:agent-filter f4))))))
 
 (deftest test-toggle-status-filter-full-cycle
   (testing "full status cycle does not throw on PersistentVector"
@@ -213,6 +212,5 @@
       (is (= :error (:status-filter f3)))
       (is (= :waiting (:status-filter f4)))
       (is (= :idle (:status-filter f5)))
-      (is (nil? (:status-filter f6)) "wraps back to nil")
-      (is (= :running (:status-filter f7))
-          "second cycle starts correctly"))))
+      (is (nil? (:status-filter f6)))
+      (is (= :running (:status-filter f7))))))

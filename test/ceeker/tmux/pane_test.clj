@@ -22,96 +22,114 @@
       (doseq [file (reverse (file-seq f))]
         (.delete file)))))
 
-(deftest test-list-pane-cwds-returns-nil-or-set
-  (let [result (pane/list-pane-cwds)]
-    (is (or (nil? result) (set? result)))))
-
-(deftest test-close-stale-via-store
+(deftest test-close-stale-via-pred
   (let [dir (temp-dir)]
     (try
       (store/update-session!
-       dir "s1"
+       dir "%1"
        {:agent-type :claude-code
         :agent-status :running
         :cwd "/tmp/alive"
+        :pane-id "%1"
         :last-message "working"})
       (store/update-session!
-       dir "s2"
+       dir "%2"
        {:agent-type :codex
         :agent-status :running
         :cwd "/tmp/dead"
+        :pane-id "%2"
         :last-message "working"})
-      (store/close-stale-sessions!
-       dir #{"/tmp/alive"})
+      (let [alive-cwds #{"/tmp/alive"}]
+        (store/close-sessions-by-pred!
+         dir
+         (fn [_key session]
+           (and (seq (:cwd session))
+                (not (contains? alive-cwds
+                                (:cwd session)))))))
       (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])
-            s2 (get-in state [:sessions "s2"])]
+            s1 (get-in state [:sessions "%1"])
+            s2 (get-in state [:sessions "%2"])]
         (is (= :running (:agent-status s1)))
         (is (= :closed (:agent-status s2)))
-        (is (= "working" (:last-message s2))
-            "last-message preserved when pane closes"))
+        (is (= "working" (:last-message s2))))
       (finally
         (cleanup-dir dir)))))
 
-(deftest test-completed-not-affected
+(deftest test-completed-not-affected-by-pred
   (let [dir (temp-dir)]
     (try
       (store/update-session!
-       dir "s1"
+       dir "%1"
        {:agent-type :claude-code
         :agent-status :completed
         :cwd "/tmp/gone"
+        :pane-id "%1"
         :last-message "done"})
-      (store/close-stale-sessions! dir #{})
+      (store/close-sessions-by-pred!
+       dir
+       (fn [_key session]
+         (seq (:cwd session))))
       (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])]
+            s1 (get-in state [:sessions "%1"])]
         (is (= :completed (:agent-status s1)))
         (is (= "done" (:last-message s1))))
       (finally
         (cleanup-dir dir)))))
 
-(deftest test-empty-cwd-not-closed
+(deftest test-empty-cwd-not-closed-by-pred
   (let [dir (temp-dir)]
     (try
       (store/update-session!
-       dir "s1"
+       dir "%1"
        {:agent-type :codex
         :agent-status :running
         :cwd ""
+        :pane-id "%1"
         :last-message "no cwd"})
-      (store/close-stale-sessions! dir #{})
+      (store/close-sessions-by-pred!
+       dir
+       (fn [_key session]
+         (and (seq (:cwd session))
+              (not (contains? #{} (:cwd session))))))
       (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])]
+            s1 (get-in state [:sessions "%1"])]
         (is (= :running (:agent-status s1))))
       (finally
         (cleanup-dir dir)))))
 
-(deftest test-all-panes-alive
+(deftest test-all-panes-alive-via-pred
   (let [dir (temp-dir)]
     (try
       (store/update-session!
-       dir "s1"
+       dir "%1"
        {:agent-type :claude-code
         :agent-status :running
         :cwd "/tmp/a"
+        :pane-id "%1"
         :last-message "ok"})
       (store/update-session!
-       dir "s2"
+       dir "%2"
        {:agent-type :codex
         :agent-status :running
         :cwd "/tmp/b"
+        :pane-id "%2"
         :last-message "ok"})
-      (store/close-stale-sessions!
-       dir #{"/tmp/a" "/tmp/b"})
+      (let [alive #{"/tmp/a" "/tmp/b"}]
+        (store/close-sessions-by-pred!
+         dir
+         (fn [_key session]
+           (and (seq (:cwd session))
+                (not (contains? alive
+                                (:cwd session)))))))
       (let [state (store/read-sessions dir)
-            s1 (get-in state [:sessions "s1"])
-            s2 (get-in state [:sessions "s2"])]
+            s1 (get-in state [:sessions "%1"])
+            s2 (get-in state [:sessions "%2"])]
         (is (= :running (:agent-status s1)))
         (is (= :running (:agent-status s2))))
       (finally
         (cleanup-dir dir)))))
 
-;; --- Process tree liveness tests (C) ---
+;; --- Process tree liveness tests ---
 
 (deftest test-list-pane-info-returns-nil-or-list
   (let [result (pane/list-pane-info)]
@@ -166,9 +184,6 @@
                        pid :claude-code)))))
 
 ;; --- capture-state-for-closed-session reactivation tests ---
-;; Note: capture-state-for-closed-session now takes [session pane-infos]
-;; and requires the agent to be alive in the process tree before
-;; reactivating from terminal capture.
 
 (defn- make-pane-infos
   "Creates pane-infos matching a session's pane-id."
@@ -176,11 +191,9 @@
   [{:pane-id pane-id :pid pid :cwd "/tmp/work"}])
 
 (deftest test-closed-session-idle-not-reactivated
-  (testing "Closed session with :idle detection is NOT reactivated
-            (prevents closed->idle flapping when pane has plain shell)"
+  (testing "Closed session with :idle detection is NOT reactivated"
     (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
           session {:agent-status :closed
-                   :superseded false
                    :pane-id "%99"
                    :agent-type :claude-code}
           pane-infos (make-pane-infos "%99" "12345")]
@@ -194,7 +207,6 @@
   (testing "Closed session with :running detection and live agent IS reactivated"
     (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
           session {:agent-status :closed
-                   :superseded false
                    :pane-id "%99"
                    :agent-type :claude-code}
           pane-infos (make-pane-infos "%99" "12345")]
@@ -210,7 +222,6 @@
   (testing "Closed session with :waiting detection and live agent IS reactivated"
     (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
           session {:agent-status :closed
-                   :superseded false
                    :pane-id "%99"
                    :agent-type :claude-code}
           pane-infos (make-pane-infos "%99" "12345")]
@@ -223,25 +234,10 @@
           (is (some? result))
           (is (= :waiting (:agent-status result))))))))
 
-(deftest test-closed-superseded-not-reactivated
-  (testing "Superseded closed session is never reactivated"
-    (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
-          session {:agent-status :closed
-                   :superseded true
-                   :pane-id "%99"
-                   :agent-type :claude-code}
-          pane-infos (make-pane-infos "%99" "12345")]
-      (with-redefs [capture/detect-agent-state
-                    (fn [_ _] {:status :running :waiting-reason nil})
-                    pane/find-agent-in-tree
-                    (fn [_ _] :found)]
-        (is (nil? (capture-fn session pane-infos)))))))
-
 (deftest test-closed-no-pane-not-reactivated
   (testing "Closed session without pane-id is never reactivated"
     (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
           session {:agent-status :closed
-                   :superseded false
                    :pane-id nil
                    :agent-type :claude-code}
           pane-infos (make-pane-infos "%99" "12345")]
@@ -251,7 +247,7 @@
                     (fn [_ _] :found)]
         (is (nil? (capture-fn session pane-infos)))))))
 
-;; --- session-has-live-agent? unit tests (D) ---
+;; --- session-has-live-agent? unit tests ---
 
 (deftest test-session-has-live-agent-dead-process
   (testing "Returns :dead when pane process tree has no agent"
@@ -286,11 +282,10 @@
                     (fn [_ _] :found)]
         (is (= :dead (has-live? session pane-infos)))))))
 
-;; --- find-agent-in-tree dead process detection (E) ---
+;; --- find-agent-in-tree dead process detection ---
 
 (deftest test-find-agent-dead-process-returns-not-found
-  (testing "Dead process (nil cmdline + not alive) returns
-            :not-found instead of :unknown"
+  (testing "Dead process returns :not-found"
     (with-redefs [ceeker.tmux.pane/read-proc-cmdline
                   (fn [_] nil)
                   ceeker.tmux.pane/process-alive?
@@ -299,8 +294,7 @@
                          "999999" :claude-code))))))
 
 (deftest test-find-agent-unreadable-process-returns-unknown
-  (testing "Live process with unreadable cmdline still
-            returns :unknown"
+  (testing "Live process with unreadable cmdline returns :unknown"
     (with-redefs [ceeker.tmux.pane/read-proc-cmdline
                   (fn [_] nil)
                   ceeker.tmux.pane/process-alive?
@@ -308,56 +302,14 @@
       (is (= :unknown (pane/find-agent-in-tree
                        "999999" :claude-code))))))
 
-;; --- stale-session per-pane dedup tests (F) ---
-
-(deftest test-stale-closes-older-duplicate-pane-session
-  (testing "When two active sessions share a pane-id with
-            different agent types, the older one is closed
-            by dedup even when agent is alive.
-            (Supersede only handles same agent-type, so this
-            tests the dedup path.)"
-    (let [dir (temp-dir)]
-      (try
-        (store/update-session!
-         dir "old"
-         {:agent-type :claude-code
-          :agent-status :running
-          :cwd "/tmp/work-a"
-          :pane-id "%5"
-          :last-updated (.toString
-                         (.minusSeconds
-                          (java.time.Instant/now) 30))})
-        (store/update-session!
-         dir "new"
-         {:agent-type :codex
-          :agent-status :running
-          :cwd "/tmp/work-b"
-          :pane-id "%5"
-          :last-updated (.toString
-                         (java.time.Instant/now))})
-        (with-redefs [pane/list-pane-info
-                      (fn [] [{:pane-id "%5"
-                               :pid "12345"
-                               :cwd "/tmp/work-b"}])
-                      pane/find-agent-in-tree
-                      (fn [_ _] :found)]
-          (pane/close-stale-sessions! dir))
-        (let [state (store/read-sessions dir)
-              old (get-in state [:sessions "old"])
-              new-s (get-in state [:sessions "new"])]
-          (is (= :closed (:agent-status old))
-              "Older session sharing pane must be closed")
-          (is (= :running (:agent-status new-s))
-              "Newest session in pane stays running"))
-        (finally
-          (cleanup-dir dir))))))
+;; --- stale session tests ---
 
 (deftest test-stale-keeps-sole-live-session
   (testing "Single active session with live agent not closed"
     (let [dir (temp-dir)]
       (try
         (store/update-session!
-         dir "s1"
+         dir "%5"
          {:agent-type :claude-code
           :agent-status :running
           :cwd "/tmp/work"
@@ -371,21 +323,18 @@
                       pane/find-agent-in-tree
                       (fn [_ _] :found)]
           (pane/close-stale-sessions! dir))
-        (let [s1 (get-in (store/read-sessions dir)
-                         [:sessions "s1"])]
-          (is (= :running (:agent-status s1))
-              "Sole session with live agent stays running"))
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "%5"])]
+          (is (= :running (:agent-status s))))
         (finally
           (cleanup-dir dir))))))
 
-;; --- New tests for stale session / pane reuse fixes ---
+;; --- Closed session with dead agent not reactivated ---
 
 (deftest test-closed-session-dead-agent-not-reactivated
-  (testing "Closed session with :running capture but dead agent is NOT reactivated
-            (prevents false reactivation from stale terminal output)"
+  (testing "Closed session with dead agent is NOT reactivated"
     (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
           session {:agent-status :closed
-                   :superseded false
                    :pane-id "%99"
                    :agent-type :claude-code}
           pane-infos (make-pane-infos "%99" "12345")]
@@ -393,15 +342,12 @@
                     (fn [_ _] {:status :running :waiting-reason nil})
                     pane/find-agent-in-tree
                     (fn [_ _] :not-found)]
-        (is (nil? (capture-fn session pane-infos))
-            "Must not reactivate when agent process is dead")))))
+        (is (nil? (capture-fn session pane-infos)))))))
 
 (deftest test-closed-session-unknown-agent-not-reactivated
-  (testing "Closed session with :unknown liveness is NOT reactivated
-            (conservative: requires confirmed :alive)"
+  (testing "Closed session with :unknown liveness is NOT reactivated"
     (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
           session {:agent-status :closed
-                   :superseded false
                    :pane-id "%99"
                    :agent-type :claude-code}
           pane-infos (make-pane-infos "%99" "12345")]
@@ -409,20 +355,18 @@
                     (fn [_ _] {:status :running :waiting-reason nil})
                     pane/find-agent-in-tree
                     (fn [_ _] :unknown)]
-        (is (nil? (capture-fn session pane-infos))
-            "Must not reactivate when agent liveness is unknown")))))
+        (is (nil? (capture-fn session pane-infos)))))))
 
 (deftest test-closed-session-no-matching-pane-not-reactivated
   (testing "Closed session whose pane-id is not in pane-infos is NOT reactivated"
     (let [capture-fn #'ceeker.tmux.pane/capture-state-for-closed-session
           session {:agent-status :closed
-                   :superseded false
                    :pane-id "%99"
                    :agent-type :claude-code}
-          pane-infos [{:pane-id "%50" :pid "999" :cwd "/tmp/other"}]]
+          pane-infos [{:pane-id "%50" :pid "999"
+                       :cwd "/tmp/other"}]]
       (with-redefs [capture/detect-agent-state
                     (fn [_ _] {:status :running :waiting-reason nil})
                     pane/find-agent-in-tree
                     (fn [_ _] :found)]
-        (is (nil? (capture-fn session pane-infos))
-            "Must not reactivate when pane-id does not match any live pane")))))
+        (is (nil? (capture-fn session pane-infos)))))))

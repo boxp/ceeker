@@ -83,8 +83,8 @@
         (println (str "ceeker: recorded "
                       (:agent-type result) " "
                       (or event-type "notify")
-                      " for "
-                      (:session-id result)))))))
+                      " for pane "
+                      (:pane-id result)))))))
 
 (defn- print-errors!
   "Prints CLI errors to stderr and exits."
