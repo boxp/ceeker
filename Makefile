@@ -1,7 +1,11 @@
-.PHONY: test lint format-check format ci run clean uber
+.PHONY: test test-install-script lint format-check format ci run clean uber
 
-test:
-	clojure -M:test
+test: test-install-script
+	mkdir -p target/test-runtime
+	XDG_RUNTIME_DIR=$(CURDIR)/target/test-runtime clojure -M:test
+
+test-install-script:
+	sh test/install_script_test.sh
 
 lint:
 	clojure -M:lint

@@ -21,6 +21,30 @@ tmuxペインを横断してAIコーディングエージェントのセッシ�
 
 ## インストール
 
+### ワンライナーインストール
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/boxp/ceeker/main/install.sh | sh
+```
+
+対応プラットフォーム: `darwin-arm64`, `linux-amd64`, `linux-arm64`
+
+このインストーラは GitHub Releases から対応 tarball を取得し、`checksums.txt` で検証したうえで、既定では `~/.local/bin` に `ceeker` を配置します。
+
+配置先を変える例:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/boxp/ceeker/main/install.sh | sh -s -- -b ~/.local/bin
+```
+
+特定バージョンを入れる例:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/boxp/ceeker/main/install.sh | sh -s -- -v 0.1.0
+```
+
+未対応プラットフォームでは、以下の Homebrew または tarball 手順を使ってください。
+
 ### Homebrew（macOS / Linux）
 
 ```bash
