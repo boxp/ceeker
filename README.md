@@ -21,6 +21,30 @@ In environments where multiple AI coding agents (Claude Code / Codex) run in par
 
 ## Installation
 
+### One-liner install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/boxp/ceeker/main/install.sh | sh
+```
+
+Supported platforms: `darwin-arm64`, `linux-amd64`, `linux-arm64`
+
+This installer downloads the matching release tarball from GitHub Releases, verifies it against `checksums.txt`, and installs `ceeker` to `~/.local/bin` by default.
+
+Custom install directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/boxp/ceeker/main/install.sh | sh -s -- -b ~/.local/bin
+```
+
+Install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/boxp/ceeker/main/install.sh | sh -s -- -v 0.1.0
+```
+
+Unsupported platforms should use Homebrew or the manual tarball installation below.
+
 ### Homebrew (macOS / Linux)
 
 ```bash
