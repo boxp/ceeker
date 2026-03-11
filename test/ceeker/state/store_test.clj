@@ -969,3 +969,251 @@
               "Completed session with live pane should not be purged"))
         (finally
           (cleanup-dir dir))))))
+
+;; --- Resume duplicate session regression tests ---
+
+(deftest test-resume-supersedes-active-session-in-same-pane
+  (testing "Resuming a completed session supersedes the active
+            session in the same pane (the core resume-dup fix)"
+    (let [dir (temp-dir)]
+      (try
+        ;; Session A runs and completes
+        (store/update-session!
+         dir "session-A"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project"
+          :pane-id "%42"
+          :last-message "working"})
+        (store/update-session!
+         dir "session-A"
+         {:agent-status :completed
+          :last-message "done"})
+        ;; Session B starts fresh in same pane
+        (store/update-session!
+         dir "session-B"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project"
+          :pane-id "%42"
+          :last-message "fresh start"})
+        ;; Verify B is running, A is completed
+        (let [state (store/read-sessions dir)]
+          (is (= :completed
+                 (get-in state [:sessions "session-A"
+                                :agent-status])))
+          (is (= :running
+                 (get-in state [:sessions "session-B"
+                                :agent-status]))))
+        ;; Resume A: SessionStart hook fires with session-A
+        (store/update-session!
+         dir "session-A"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project"
+          :pane-id "%42"
+          :last-message "resumed"})
+        ;; A should be running, B should be superseded
+        (let [state (store/read-sessions dir)
+              a (get-in state [:sessions "session-A"])
+              b (get-in state [:sessions "session-B"])]
+          (is (= :running (:agent-status a))
+              "Resumed session must be running")
+          (is (= "resumed" (:last-message a)))
+          (is (= :closed (:agent-status b))
+              "Previous active session must be superseded")
+          (is (true? (:superseded b))
+              "Previous session must have superseded flag")
+          (is (= "fresh start" (:last-message b))
+              "Superseded session preserves its last-message"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-resume-with-different-cwd-supersedes
+  (testing "Resuming a session with different CWD still
+            supersedes the active session in the same pane"
+    (let [dir (temp-dir)]
+      (try
+        ;; Session A completed in /project-a
+        (store/update-session!
+         dir "session-A"
+         {:agent-type :claude-code
+          :agent-status :completed
+          :cwd "/tmp/project-a"
+          :pane-id "%42"
+          :last-message "done-a"})
+        ;; Session B running in /project-b, same pane
+        (store/update-session!
+         dir "session-B"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project-b"
+          :pane-id "%42"
+          :last-message "working-b"})
+        ;; Resume A (cwd is /project-a, different from B)
+        (store/update-session!
+         dir "session-A"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project-a"
+          :pane-id "%42"
+          :last-message "resumed-a"})
+        (let [state (store/read-sessions dir)
+              a (get-in state [:sessions "session-A"])
+              b (get-in state [:sessions "session-B"])]
+          (is (= :running (:agent-status a)))
+          (is (= :closed (:agent-status b))
+              "B must be superseded even with different CWD")
+          (is (true? (:superseded b))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-resume-does-not-affect-different-pane
+  (testing "Resuming a session does not supersede sessions
+            in a different pane"
+    (let [dir (temp-dir)]
+      (try
+        ;; Session A completed in pane %42
+        (store/update-session!
+         dir "session-A"
+         {:agent-type :claude-code
+          :agent-status :completed
+          :cwd "/tmp/project"
+          :pane-id "%42"})
+        ;; Session C running in pane %99
+        (store/update-session!
+         dir "session-C"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project"
+          :pane-id "%99"
+          :last-message "other-pane"})
+        ;; Resume A in pane %42
+        (store/update-session!
+         dir "session-A"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project"
+          :pane-id "%42"})
+        (let [state (store/read-sessions dir)
+              a (get-in state [:sessions "session-A"])
+              c (get-in state [:sessions "session-C"])]
+          (is (= :running (:agent-status a)))
+          (is (= :running (:agent-status c))
+              "Session in different pane must not be affected"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-resume-closed-session-supersedes
+  (testing "Resuming a closed (non-superseded) session also
+            triggers supersede"
+    (let [dir (temp-dir)]
+      (try
+        ;; Session A was closed (not superseded)
+        (store/update-session!
+         dir "session-A"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project"
+          :pane-id "%42"})
+        (store/close-stale-sessions! dir #{})
+        (let [s (get-in (store/read-sessions dir)
+                        [:sessions "session-A"])]
+          (is (= :closed (:agent-status s)))
+          (is (nil? (:superseded s))))
+        ;; Session B starts in same pane
+        (store/update-session!
+         dir "session-B"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project"
+          :pane-id "%42"})
+        ;; Resume A
+        (store/update-session!
+         dir "session-A"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project"
+          :pane-id "%42"})
+        (let [state (store/read-sessions dir)
+              a (get-in state [:sessions "session-A"])
+              b (get-in state [:sessions "session-B"])]
+          (is (= :running (:agent-status a)))
+          (is (= :closed (:agent-status b))
+              "B must be superseded when A resumes")
+          (is (true? (:superseded b))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-ongoing-running-update-no-supersede
+  (testing "Normal hook updates on an already-running session
+            do not trigger supersede"
+    (let [dir (temp-dir)]
+      (try
+        ;; Both sessions running in different panes
+        (store/update-session!
+         dir "s1"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/work"
+          :pane-id "%42"})
+        (store/update-session!
+         dir "s2"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/other"
+          :pane-id "%99"})
+        ;; Update s1 with running status (ongoing hook)
+        (store/update-session!
+         dir "s1"
+         {:agent-status :running
+          :last-message "tool used"})
+        (let [state (store/read-sessions dir)
+              s1 (get-in state [:sessions "s1"])
+              s2 (get-in state [:sessions "s2"])]
+          (is (= :running (:agent-status s1)))
+          (is (= :running (:agent-status s2))
+              "Ongoing update must not supersede other sessions"))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-delayed-hook-on-superseded-session-no-eviction
+  (testing "Delayed running hook for a superseded session must
+            not evict the current active session"
+    (let [dir (temp-dir)]
+      (try
+        ;; Session A runs, then B supersedes A
+        (store/update-session!
+         dir "session-A"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project"
+          :pane-id "%42"
+          :last-message "working-A"})
+        (store/update-session!
+         dir "session-B"
+         {:agent-type :claude-code
+          :agent-status :running
+          :cwd "/tmp/project"
+          :pane-id "%42"
+          :last-message "working-B"})
+        ;; A is superseded+closed, B is running
+        (let [a (get-in (store/read-sessions dir)
+                        [:sessions "session-A"])]
+          (is (= :closed (:agent-status a)))
+          (is (true? (:superseded a))))
+        ;; Delayed hook for A arrives with :running
+        (store/update-session!
+         dir "session-A"
+         {:agent-status :running
+          :last-message "delayed event"})
+        ;; B must remain running (not evicted)
+        (let [state (store/read-sessions dir)
+              a (get-in state [:sessions "session-A"])
+              b (get-in state [:sessions "session-B"])]
+          (is (= :running (:agent-status b))
+              "Active session must not be evicted by delayed hook")
+          (is (= :closed (:agent-status a))
+              "Superseded session must stay closed"))
+        (finally
+          (cleanup-dir dir))))))
