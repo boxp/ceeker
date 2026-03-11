@@ -3,7 +3,7 @@
             [ceeker.state.store :as store]
             [cheshire.core :as json]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is testing]]))
 
 (defn- temp-dir
   "Creates a temporary directory for testing."
@@ -102,8 +102,7 @@
     (is (= :claude-code (:agent-type result)))
     (is (= :completed (:agent-status result)))
     (is (= "Refactoring complete."
-           (:last-message result))
-        "Stop should include :last-message from last_assistant_message")))
+           (:last-message result)))))
 
 (deftest test-normalize-claude-pre-tool-use
   (let [result (handler/normalize-event
@@ -117,8 +116,7 @@
                  :tool_input {:command "npm test"}})]
     (is (= "test-789" (:session-id result)))
     (is (= :running (:agent-status result)))
-    (is (not (contains? result :last-message))
-        "PreToolUse should not include :last-message")))
+    (is (not (contains? result :last-message)))))
 
 (deftest test-normalize-claude-post-tool-use
   (let [result (handler/normalize-event
@@ -133,8 +131,7 @@
                  :tool_output "OK"})]
     (is (= "test-post" (:session-id result)))
     (is (= :running (:agent-status result)))
-    (is (not (contains? result :last-message))
-        "PostToolUse should not include :last-message")))
+    (is (not (contains? result :last-message)))))
 
 (deftest test-normalize-claude-post-tool-use-failure
   (let [result (handler/normalize-event
@@ -148,8 +145,7 @@
                  :tool_input {:command "make build"}})]
     (is (= "test-fail" (:session-id result)))
     (is (= :running (:agent-status result)))
-    (is (not (contains? result :last-message))
-        "PostToolUseFailure should not include :last-message")))
+    (is (not (contains? result :last-message)))))
 
 (deftest test-normalize-claude-session-start
   (let [result (handler/normalize-event
@@ -162,8 +158,7 @@
     (is (= "sess-start" (:session-id result)))
     (is (= :claude-code (:agent-type result)))
     (is (= :running (:agent-status result)))
-    (is (not (contains? result :last-message))
-        "SessionStart should not include :last-message")
+    (is (not (contains? result :last-message)))
     (is (= "/home/user/project" (:cwd result)))))
 
 (deftest test-normalize-claude-subagent-start
@@ -176,8 +171,7 @@
                  :hook_event_name "SubagentStart"})]
     (is (= "sub-start" (:session-id result)))
     (is (= :running (:agent-status result)))
-    (is (not (contains? result :last-message))
-        "SubagentStart should not include :last-message")))
+    (is (not (contains? result :last-message)))))
 
 (deftest test-normalize-claude-subagent-stop
   (let [result (handler/normalize-event
@@ -191,8 +185,7 @@
     (is (= "sub-stop" (:session-id result)))
     (is (= :running (:agent-status result)))
     (is (= "Subtask finished."
-           (:last-message result))
-        "SubagentStop should include :last-message from last_assistant_message")))
+           (:last-message result)))))
 
 (deftest test-normalize-claude-task-completed
   (let [result (handler/normalize-event
@@ -204,8 +197,7 @@
                  :hook_event_name "TaskCompleted"})]
     (is (= "task-done" (:session-id result)))
     (is (= :completed (:agent-status result)))
-    (is (not (contains? result :last-message))
-        "TaskCompleted should not include :last-message")))
+    (is (not (contains? result :last-message)))))
 
 ;; --- Claude: hook_event_name fallback ---
 
@@ -223,8 +215,7 @@
                     dir "claude" nil payload)]
         (is (= "fallback-1" (:session-id result)))
         (is (= :completed (:agent-status result)))
-        (is (not (contains? result :last-message))
-            "Stop without last_assistant_message should preserve existing :last-message"))
+        (is (not (contains? result :last-message))))
       (finally
         (cleanup-dir dir)))))
 
@@ -233,98 +224,96 @@
 (deftest test-claude-non-updating-event-preserves-message
   (let [dir (temp-dir)]
     (try
-      ;; First: Notification sets last-message
-      (let [notif-payload
-            (json/generate-string
-             {:session_id "preserve-1"
-              :cwd "/tmp/work"
-              :hook_event_name "Notification"
-              :message "Important update"})]
-        (handler/handle-hook!
-         dir "claude" "Notification" notif-payload))
-      ;; Second: PreToolUse should preserve last-message
-      (let [tool-payload
-            (json/generate-string
-             {:session_id "preserve-1"
-              :cwd "/tmp/work"
-              :hook_event_name "PreToolUse"
-              :tool_name "Bash"
-              :tool_input {:command "ls"}})
-            result (handler/handle-hook!
-                    dir "claude" "PreToolUse" tool-payload)
-            stored (store/read-sessions dir)
-            session (get-in stored
-                            [:sessions "preserve-1"])]
-        (is (not (contains? result :last-message))
-            "PreToolUse result should not contain :last-message")
-        (is (= "Important update"
-               (:last-message session))
-            "Store should preserve last-message from Notification"))
+      (with-redefs [handler/current-pane-id
+                    (constantly "%99")]
+        (let [notif-payload
+              (json/generate-string
+               {:session_id "preserve-1"
+                :cwd "/tmp/work"
+                :hook_event_name "Notification"
+                :message "Important update"})]
+          (handler/handle-hook!
+           dir "claude" "Notification" notif-payload))
+        (let [tool-payload
+              (json/generate-string
+               {:session_id "preserve-1"
+                :cwd "/tmp/work"
+                :hook_event_name "PreToolUse"
+                :tool_name "Bash"
+                :tool_input {:command "ls"}})
+              result (handler/handle-hook!
+                      dir "claude" "PreToolUse" tool-payload)
+              stored (store/read-sessions dir)
+              session (get-in stored [:sessions "%99"])]
+          (is (not (contains? result :last-message)))
+          (is (= "Important update"
+                 (:last-message session)))))
       (finally
         (cleanup-dir dir)))))
 
 (deftest test-claude-stop-overwrites-last-message-when-present
   (let [dir (temp-dir)]
     (try
-      (let [notif-payload
-            (json/generate-string
-             {:session_id "stop-msg-1"
-              :cwd "/tmp/work"
-              :hook_event_name "Notification"
-              :message "Working on it"})]
-        (handler/handle-hook!
-         dir "claude" "Notification" notif-payload))
-      (let [stop-payload
-            (json/generate-string
-             {:session_id "stop-msg-1"
-              :cwd "/tmp/work"
-              :hook_event_name "Stop"
-              :last_assistant_message "Done. Updated 2 files."})
-            result (handler/handle-hook!
-                    dir "claude" "Stop" stop-payload)
-            stored (store/read-sessions dir)
-            session (get-in stored [:sessions "stop-msg-1"])]
-        (is (= :completed (:agent-status result)))
-        (is (= "Done. Updated 2 files."
-               (:last-message result)))
-        (is (= "Done. Updated 2 files."
-               (:last-message session))
-            "Store should keep the final assistant response from Stop"))
+      (with-redefs [handler/current-pane-id
+                    (constantly "%99")]
+        (let [notif-payload
+              (json/generate-string
+               {:session_id "stop-msg-1"
+                :cwd "/tmp/work"
+                :hook_event_name "Notification"
+                :message "Working on it"})]
+          (handler/handle-hook!
+           dir "claude" "Notification" notif-payload))
+        (let [stop-payload
+              (json/generate-string
+               {:session_id "stop-msg-1"
+                :cwd "/tmp/work"
+                :hook_event_name "Stop"
+                :last_assistant_message "Done. Updated 2 files."})
+              result (handler/handle-hook!
+                      dir "claude" "Stop" stop-payload)
+              stored (store/read-sessions dir)
+              session (get-in stored [:sessions "%99"])]
+          (is (= :completed (:agent-status result)))
+          (is (= "Done. Updated 2 files."
+                 (:last-message result)))
+          (is (= "Done. Updated 2 files."
+                 (:last-message session)))))
       (finally
         (cleanup-dir dir)))))
 
 (deftest test-claude-real-payload-e2e
   (let [dir (temp-dir)]
     (try
-      ;; PreToolUse should not set last-message in store
-      (let [payload
-            (json/generate-string
-             {:session_id "abc123"
-              :transcript_path
-              "/home/user/.claude/projects/p/t.json"
-              :cwd "/home/user/project"
-              :permission_mode "default"
-              :hook_event_name "PreToolUse"
-              :tool_name "Bash"
-              :tool_input {:command "npm test"}})
-            result (handler/handle-hook!
-                    dir "claude" "PreToolUse"
-                    payload)]
-        (is (= "abc123" (:session-id result)))
-        (is (= :claude-code (:agent-type result)))
-        (is (= :running (:agent-status result)))
-        (is (not (contains? result :last-message)))
-        (is (= "/home/user/project" (:cwd result)))
-        (let [stored (store/read-sessions dir)
-              session (get-in stored
-                              [:sessions "abc123"])]
-          (is (some? session))
-          (is (= :claude-code
-                 (:agent-type session)))))
+      (with-redefs [handler/current-pane-id
+                    (constantly "%10")]
+        (let [payload
+              (json/generate-string
+               {:session_id "abc123"
+                :transcript_path
+                "/home/user/.claude/projects/p/t.json"
+                :cwd "/home/user/project"
+                :permission_mode "default"
+                :hook_event_name "PreToolUse"
+                :tool_name "Bash"
+                :tool_input {:command "npm test"}})
+              result (handler/handle-hook!
+                      dir "claude" "PreToolUse"
+                      payload)]
+          (is (= "abc123" (:session-id result)))
+          (is (= :claude-code (:agent-type result)))
+          (is (= :running (:agent-status result)))
+          (is (not (contains? result :last-message)))
+          (is (= "/home/user/project" (:cwd result)))
+          (let [stored (store/read-sessions dir)
+                session (get-in stored [:sessions "%10"])]
+            (is (some? session))
+            (is (= :claude-code
+                   (:agent-type session))))))
       (finally
         (cleanup-dir dir)))))
 
-;; --- Codex tests (unchanged behavior) ---
+;; --- Codex tests ---
 
 (deftest test-normalize-codex-notification
   (let [result (handler/normalize-event
@@ -354,95 +343,97 @@
 (deftest test-handle-hook-with-json-payload
   (let [dir (temp-dir)]
     (try
-      (let [payload (json/generate-string
-                     {:session_id "hook-test-1"
-                      :transcript_path "/tmp/t.json"
-                      :cwd "/tmp/hook-test"
-                      :permission_mode "default"
-                      :hook_event_name "Notification"
-                      :title "Testing hook"})
-            result (handler/handle-hook!
-                    dir "claude" "Notification"
-                    payload)]
-        (is (= "hook-test-1" (:session-id result)))
-        (is (= :claude-code (:agent-type result)))
-        (is (= "Testing hook" (:last-message result)))
-        (let [stored (store/read-sessions dir)
-              session (get-in stored
-                              [:sessions
-                               "hook-test-1"])]
-          (is (some? session))
-          (is (= :claude-code
-                 (:agent-type session)))))
+      (with-redefs [handler/current-pane-id
+                    (constantly "%5")]
+        (let [payload (json/generate-string
+                       {:session_id "hook-test-1"
+                        :transcript_path "/tmp/t.json"
+                        :cwd "/tmp/hook-test"
+                        :permission_mode "default"
+                        :hook_event_name "Notification"
+                        :title "Testing hook"})
+              result (handler/handle-hook!
+                      dir "claude" "Notification"
+                      payload)]
+          (is (= "hook-test-1" (:session-id result)))
+          (is (= :claude-code (:agent-type result)))
+          (is (= "Testing hook" (:last-message result)))
+          (let [stored (store/read-sessions dir)
+                session (get-in stored [:sessions "%5"])]
+            (is (some? session))
+            (is (= :claude-code
+                   (:agent-type session))))))
       (finally
         (cleanup-dir dir)))))
 
 (deftest test-codex-notify-real-payload
   (let [dir (temp-dir)]
     (try
-      (let [payload
-            (json/generate-string
-             {:type "agent-turn-complete"
-              :thread-id
-              "b5f6c1c2-1111-2222-3333-444455556666"
-              :turn-id "12345"
-              :cwd "/home/user/project"
-              :client "codex-tui"
-              :input-messages ["Fix the tests"]
-              :last-assistant-message
-              "All tests pass now."})
-            result (handler/handle-hook!
-                    dir "codex" nil payload)]
-        (is (= "b5f6c1c2-1111-2222-3333-444455556666"
-               (:session-id result)))
-        (is (= :codex (:agent-type result)))
-        (is (= :running (:agent-status result)))
-        (is (= "All tests pass now."
-               (:last-message result)))
-        (is (= "/home/user/project" (:cwd result)))
-        (let [stored (store/read-sessions dir)
-              session
-              (get-in
-               stored
-               [:sessions
-                "b5f6c1c2-1111-2222-3333-444455556666"])]
-          (is (some? session))
-          (is (= :codex (:agent-type session)))
-          (is (= "/home/user/project"
-                 (:cwd session)))))
+      (with-redefs [handler/current-pane-id
+                    (constantly "%7")]
+        (let [payload
+              (json/generate-string
+               {:type "agent-turn-complete"
+                :thread-id
+                "b5f6c1c2-1111-2222-3333-444455556666"
+                :turn-id "12345"
+                :cwd "/home/user/project"
+                :client "codex-tui"
+                :input-messages ["Fix the tests"]
+                :last-assistant-message
+                "All tests pass now."})
+              result (handler/handle-hook!
+                      dir "codex" nil payload)]
+          (is (= "b5f6c1c2-1111-2222-3333-444455556666"
+                 (:session-id result)))
+          (is (= :codex (:agent-type result)))
+          (is (= :running (:agent-status result)))
+          (is (= "All tests pass now."
+                 (:last-message result)))
+          (is (= "/home/user/project" (:cwd result)))
+          (let [stored (store/read-sessions dir)
+                session (get-in stored [:sessions "%7"])]
+            (is (some? session))
+            (is (= :codex (:agent-type session)))
+            (is (= "/home/user/project"
+                   (:cwd session))))))
       (finally
         (cleanup-dir dir)))))
 
 (deftest test-codex-notify-no-message
   (let [dir (temp-dir)]
     (try
-      (let [payload
-            (json/generate-string
-             {:type "agent-turn-complete"
-              :thread-id "abc-123"
-              :cwd "/tmp/work"
-              :last-assistant-message nil})
-            result (handler/handle-hook!
-                    dir "codex" nil payload)]
-        (is (= "abc-123" (:session-id result)))
-        (is (= "notification"
-               (:last-message result))))
+      (with-redefs [handler/current-pane-id
+                    (constantly "%8")]
+        (let [payload
+              (json/generate-string
+               {:type "agent-turn-complete"
+                :thread-id "abc-123"
+                :cwd "/tmp/work"
+                :last-assistant-message nil})
+              result (handler/handle-hook!
+                      dir "codex" nil payload)]
+          (is (= "abc-123" (:session-id result)))
+          (is (= "notification"
+                 (:last-message result)))))
       (finally
         (cleanup-dir dir)))))
 
 (deftest test-codex-legacy-explicit-event
   (let [dir (temp-dir)]
     (try
-      (let [payload
-            (json/generate-string
-             {:session_id "legacy-1"
-              :message "Running"
-              :cwd "/tmp/legacy"})
-            result (handler/handle-hook!
-                    dir "codex" "notification"
-                    payload)]
-        (is (= "legacy-1" (:session-id result)))
-        (is (= "Running" (:last-message result))))
+      (with-redefs [handler/current-pane-id
+                    (constantly "%9")]
+        (let [payload
+              (json/generate-string
+               {:session_id "legacy-1"
+                :message "Running"
+                :cwd "/tmp/legacy"})
+              result (handler/handle-hook!
+                      dir "codex" "notification"
+                      payload)]
+          (is (= "legacy-1" (:session-id result)))
+          (is (= "Running" (:last-message result)))))
       (finally
         (cleanup-dir dir)))))
 
@@ -466,7 +457,7 @@
       (finally
         (cleanup-dir dir)))))
 
-;; --- Pane ID tests (D: Agent ID + Pane Fallback) ---
+;; --- Pane ID tests ---
 
 (deftest test-session-includes-pane-id
   (let [result (handler/normalize-event
@@ -480,3 +471,53 @@
 (deftest test-current-pane-id-returns-string
   (let [pane-id (handler/current-pane-id)]
     (is (string? pane-id))))
+
+;; --- Pane-centric store key tests ---
+
+(deftest test-store-key-uses-pane-id-when-available
+  (testing "handle-hook! uses pane-id as store key"
+    (let [dir (temp-dir)]
+      (try
+        (with-redefs [handler/current-pane-id
+                      (constantly "%42")]
+          (handler/handle-hook!
+           dir "claude" "SessionStart"
+           (json/generate-string
+            {:session_id "sess-A"
+             :cwd "/tmp/work"}))
+          (handler/handle-hook!
+           dir "claude" "Notification"
+           (json/generate-string
+            {:session_id "sess-B"
+             :cwd "/tmp/work"
+             :message "from B"}))
+          (let [sessions (:sessions
+                          (store/read-sessions dir))]
+            (is (= 1 (count sessions))
+                "Same pane should have 1 entry")
+            (is (some? (get sessions "%42"))
+                "Key should be pane-id")
+            (is (= "from B"
+                   (:last-message
+                    (get sessions "%42"))))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-store-key-falls-back-to-session-id
+  (testing "handle-hook! falls back to session-id when no pane"
+    (let [dir (temp-dir)]
+      (try
+        (with-redefs [handler/current-pane-id
+                      (constantly "")]
+          (handler/handle-hook!
+           dir "claude" "SessionStart"
+           (json/generate-string
+            {:session_id "outside-tmux"
+             :cwd "/tmp/work"}))
+          (let [sessions (:sessions
+                          (store/read-sessions dir))]
+            (is (= 1 (count sessions)))
+            (is (some? (get sessions "outside-tmux"))
+                "Key should be session-id when no pane")))
+        (finally
+          (cleanup-dir dir))))))

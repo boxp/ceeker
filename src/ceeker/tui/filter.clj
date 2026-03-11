@@ -65,15 +65,16 @@
       (= status-filter (:agent-status session))))
 
 (defn- match-search?
-  "Returns true if session matches search query."
+  "Returns true if session matches search query.
+   Searches cwd and pane-id."
   [query session]
   (or (nil? query)
       (let [q (str/lower-case query)]
         (or (str/includes?
-             (str/lower-case (or (:session-id session) ""))
+             (str/lower-case (or (:cwd session) ""))
              q)
             (str/includes?
-             (str/lower-case (or (:cwd session) ""))
+             (str/lower-case (or (:pane-id session) ""))
              q)))))
 
 (defn apply-filters

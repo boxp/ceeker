@@ -28,27 +28,28 @@
   (testing "2-arity render still works"
     (let [result (view/render [] 0)]
       (is (string? result))
-      (is (str/includes? result "0 session(s)")))))
+      (is (str/includes? result "0 pane(s)")))))
 
 (deftest render-table-mode
   (testing "wide terminal uses table layout with column headers"
-    (let [sessions [{:session-id "test1"
-                     :agent-type :claude-code
+    (let [sessions [{:agent-type :claude-code
                      :agent-status :running
                      :cwd "/home/user/project"
+                     :pane-id "%1"
                      :last-message "Working..."
                      :last-updated "2026-01-01T12:00:00Z"}]
           result (view/render sessions 0 120 :auto)]
-      (is (str/includes? result "SESSION"))
+      (is (not (str/includes? result "SESSION"))
+          "SESSION column should be removed")
       (is (str/includes? result "AGENT"))
       (is (str/includes? result "MESSAGE")))))
 
 (deftest render-compact-mode
   (testing "narrow terminal uses card layout without column headers"
-    (let [sessions [{:session-id "test1"
-                     :agent-type :claude-code
+    (let [sessions [{:agent-type :claude-code
                      :agent-status :running
                      :cwd "/home/user/project"
+                     :pane-id "%1"
                      :last-message "Working..."
                      :last-updated "2026-01-01T12:00:00Z"}]
           result (view/render sessions 0 40 :auto)]
@@ -59,10 +60,10 @@
 
 (deftest render-forced-card-mode
   (testing ":card mode forces card layout even on wide terminal"
-    (let [sessions [{:session-id "test1"
-                     :agent-type :codex
+    (let [sessions [{:agent-type :codex
                      :agent-status :completed
                      :cwd "/tmp/work"
+                     :pane-id "%1"
                      :last-message "Done"
                      :last-updated "2026-01-01T12:00:00Z"}]
           result (view/render sessions 0 120 :card)]
@@ -71,14 +72,14 @@
 
 (deftest render-forced-table-mode
   (testing ":table mode forces table layout even on narrow terminal"
-    (let [sessions [{:session-id "test1"
-                     :agent-type :codex
+    (let [sessions [{:agent-type :codex
                      :agent-status :completed
                      :cwd "/tmp/work"
+                     :pane-id "%1"
                      :last-message "Done"
                      :last-updated "2026-01-01T12:00:00Z"}]
           result (view/render sessions 0 40 :table)]
-      (is (str/includes? result "SESSION"))
+      (is (str/includes? result "AGENT"))
       (is (not (str/includes? result "\u250c"))))))
 
 (deftest render-footer-shows-display-mode
