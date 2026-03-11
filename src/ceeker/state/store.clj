@@ -151,6 +151,10 @@
    and supersede targeting."
   #{:running :idle :waiting})
 
+(def ^:private terminal-statuses
+  "Session statuses that represent a finished session."
+  #{:closed :completed :error})
+
 (defn- supersede-old-sessions
   "Closes active sessions that share the same supersede key
    as the new session, excluding the new session itself.
@@ -180,14 +184,21 @@
   (= :running (:agent-status session-data)))
 
 (defn- maybe-supersede
-  "Applies supersede if session is new and running.
-   Returns the sessions map after potential supersede."
+  "Applies supersede when a running session appears in a pane.
+   Fires for brand-new sessions (not yet in store) and for
+   existing sessions reactivating from a terminal state
+   (completed/closed/error), which covers the resume case
+   where session-id is reused."
   [sessions session-id session-data now]
-  (if (and (should-supersede? session-data)
-           (not (contains? sessions session-id)))
-    (supersede-old-sessions
-     sessions session-id session-data now)
-    sessions))
+  (let [existing (get sessions session-id)]
+    (if (and (should-supersede? session-data)
+             (or (nil? existing)
+                 (and (contains? terminal-statuses
+                                 (:agent-status existing))
+                      (not (:superseded existing)))))
+      (supersede-old-sessions
+       sessions session-id session-data now)
+      sessions)))
 
 (defn- superseded?
   "Returns true if the session was marked as superseded."
@@ -207,8 +218,8 @@
 
 (defn update-session!
   "Updates a session in the state store.
-   Supersedes running sessions with the same pane key
-   only for newly created running sessions.
+   Supersedes active sessions with the same pane key when a
+   running session is new or reactivated from a terminal state.
    Ignores running updates for already-superseded sessions."
   ([session-id session-data]
    (update-session! (state-dir) session-id session-data))
@@ -352,10 +363,6 @@
   "Time-to-live (ms) for closed sessions before purging.
    Default: 5 minutes."
   300000)
-
-(def ^:private terminal-statuses
-  "Session statuses that represent a finished session."
-  #{:closed :completed :error})
 
 (defn- expired-terminal?
   "Returns true if session has a terminal status, is not
