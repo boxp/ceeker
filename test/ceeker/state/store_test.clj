@@ -374,6 +374,10 @@
 
 ;; --- Pane-centric migration: normalize-sessions ---
 
+(deftest test-normalize-nil-sessions
+  (testing "nil sessions returns empty map"
+    (is (= {} (store/normalize-sessions nil)))))
+
 (deftest test-normalize-mixed-keys
   (testing "Mixed session-id and pane-id keys are normalized
             to a single pane-id entry"

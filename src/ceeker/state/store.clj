@@ -106,17 +106,20 @@
    Entries with non-empty :pane-id are keyed by pane-id;
    entries without :pane-id keep their original key.
    When multiple entries share the same pane-id, the one
-   with the latest :last-updated wins."
+   with the latest :last-updated wins.
+   Returns empty map when sessions is nil."
   [sessions]
-  (reduce-kv
-   (fn [acc key session]
-     (let [pane-id (:pane-id session)
-           canonical (if (seq pane-id) pane-id key)]
-       (if-let [existing (get acc canonical)]
-         (assoc acc canonical (pick-newer existing session))
-         (assoc acc canonical session))))
-   {}
-   sessions))
+  (if (nil? sessions)
+    {}
+    (reduce-kv
+     (fn [acc key session]
+       (let [pane-id (:pane-id session)
+             canonical (if (seq pane-id) pane-id key)]
+         (if-let [existing (get acc canonical)]
+           (assoc acc canonical (pick-newer existing session))
+           (assoc acc canonical session))))
+     {}
+     sessions)))
 
 (defn- read-state-file
   "Reads and parses the sessions.edn file.
