@@ -643,7 +643,7 @@
           (cleanup-dir dir))))))
 
 (deftest test-codex-hooks-full-payload-fields
-  (testing "Codex hooks payload with all fields (model, permission_mode, source, transcript_path) works correctly"
+  (testing "Codex hooks payload with all fields works correctly"
     (let [dir (temp-dir)]
       (try
         (with-redefs [handler/current-pane-id
