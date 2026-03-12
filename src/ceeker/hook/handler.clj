@@ -87,7 +87,7 @@
 
 (defn- extract-codex-identity
   "Extracts session-id and cwd from Codex payload.
-   Supports both snake_case (legacy) and kebab-case (Codex notify)."
+   Supports snake_case (hooks v0.114.0+) and kebab-case (notify)."
   [payload]
   {:session-id (or (:session_id payload)
                    (:thread-id payload)
@@ -95,21 +95,26 @@
    :cwd (or (:cwd payload) "")})
 
 (defn- codex-type->event
-  "Maps Codex notify type field to internal event type."
+  "Maps Codex notify/hooks type field to internal event type."
   [type-field]
   (case type-field
     "agent-turn-complete" "notification"
+    "session_start" "SessionStart"
     type-field))
 
 (defn- codex-event-fields
-  "Returns [status message] for a Codex event type."
+  "Returns [status message] for a Codex event type.
+   Supports both notify events and hooks events (v0.114.0+)."
   [event-type payload]
   (case event-type
     "notification" [:running
                     (or (:message payload)
                         (:last-assistant-message payload)
                         "notification")]
-    "stop" [:completed "session ended"]
+    "SessionStart" [:running nil]
+    ("stop" "Stop") [:completed
+                     (or (:last_assistant_message payload)
+                         "session ended")]
     [:running (str "event: " event-type)]))
 
 (defn- normalize-codex-event
@@ -131,9 +136,11 @@
                     {:agent-type agent-type}))))
 
 (defn- resolve-codex-event
-  "Resolves event type for Codex when not explicitly given."
+  "Resolves event type for Codex when not explicitly given.
+   Checks hook_event_name (hooks v0.114.0+), then type (notify)."
   [event-type payload]
   (or event-type
+      (:hook_event_name payload)
       (when-let [t (:type payload)]
         (codex-type->event t))
       "notification"))

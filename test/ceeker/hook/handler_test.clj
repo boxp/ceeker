@@ -503,6 +503,200 @@
         (finally
           (cleanup-dir dir))))))
 
+;; --- Codex hooks (v0.114.0+) tests ---
+
+(deftest test-normalize-codex-hooks-session-start
+  (testing "Codex hooks SessionStart normalizes to :running"
+    (let [result (handler/normalize-event
+                  "codex" "SessionStart"
+                  {:session_id "codex-hooks-1"
+                   :cwd "/home/user/project"
+                   :hook_event_name "SessionStart"})]
+      (is (= "codex-hooks-1" (:session-id result)))
+      (is (= :codex (:agent-type result)))
+      (is (= :running (:agent-status result)))
+      (is (not (contains? result :last-message)))
+      (is (= "/home/user/project" (:cwd result))))))
+
+(deftest test-normalize-codex-hooks-stop
+  (testing "Codex hooks Stop normalizes to :completed"
+    (let [result (handler/normalize-event
+                  "codex" "Stop"
+                  {:session_id "codex-hooks-2"
+                   :cwd "/home/user/project"
+                   :hook_event_name "Stop"
+                   :last_assistant_message "Done."})]
+      (is (= "codex-hooks-2" (:session-id result)))
+      (is (= :codex (:agent-type result)))
+      (is (= :completed (:agent-status result)))
+      (is (= "Done." (:last-message result))))))
+
+(deftest test-normalize-codex-hooks-stop-no-message
+  (testing "Codex hooks Stop falls back to default message"
+    (let [result (handler/normalize-event
+                  "codex" "Stop"
+                  {:session_id "codex-hooks-3"
+                   :cwd "/tmp/work"
+                   :hook_event_name "Stop"})]
+      (is (= :completed (:agent-status result)))
+      (is (= "session ended" (:last-message result))))))
+
+(deftest test-codex-hooks-hook-event-name-fallback
+  (testing "resolve-codex-event uses hook_event_name from payload"
+    (let [dir (temp-dir)]
+      (try
+        (with-redefs [handler/current-pane-id
+                      (constantly "%20")]
+          (let [payload
+                (json/generate-string
+                 {:session_id "codex-hooks-fb"
+                  :cwd "/home/user/project"
+                  :hook_event_name "SessionStart"})
+                result (handler/handle-hook!
+                        dir "codex" nil payload)]
+            (is (= "codex-hooks-fb" (:session-id result)))
+            (is (= :codex (:agent-type result)))
+            (is (= :running (:agent-status result)))
+            (is (not (contains? result :last-message)))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-codex-hooks-e2e-session-lifecycle
+  (testing "Codex hooks SessionStart → Stop lifecycle"
+    (let [dir (temp-dir)]
+      (try
+        (with-redefs [handler/current-pane-id
+                      (constantly "%21")]
+          (let [start-payload
+                (json/generate-string
+                 {:session_id "lifecycle-1"
+                  :cwd "/home/user/project"
+                  :hook_event_name "SessionStart"})
+                _ (handler/handle-hook!
+                   dir "codex" "SessionStart" start-payload)
+                stored-after-start
+                (store/read-sessions dir)
+                session-started
+                (get-in stored-after-start [:sessions "%21"])]
+            (is (= :running (:agent-status session-started)))
+            (let [stop-payload
+                  (json/generate-string
+                   {:session_id "lifecycle-1"
+                    :cwd "/home/user/project"
+                    :hook_event_name "Stop"
+                    :last_assistant_message "All done."})
+                  result (handler/handle-hook!
+                          dir "codex" "Stop" stop-payload)
+                  stored-after-stop
+                  (store/read-sessions dir)
+                  session-stopped
+                  (get-in stored-after-stop [:sessions "%21"])]
+              (is (= :completed (:agent-status result)))
+              (is (= "All done." (:last-message result)))
+              (is (= :completed
+                     (:agent-status session-stopped)))
+              (is (= "All done."
+                     (:last-message session-stopped))))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-codex-hooks-session-start-snake-case
+  (testing "session_start via hook_event_name maps to SessionStart"
+    (let [dir (temp-dir)]
+      (try
+        (with-redefs [handler/current-pane-id
+                      (constantly "%22")]
+          (let [payload
+                (json/generate-string
+                 {:session_id "snake-1"
+                  :cwd "/tmp/work"
+                  :type "session_start"})
+                result (handler/handle-hook!
+                        dir "codex" nil payload)]
+            (is (= :running (:agent-status result)))
+            (is (not (contains? result :last-message)))))
+        (finally
+          (cleanup-dir dir))))))
+
+;; --- Codex notify fallback regression tests ---
+
+(deftest test-codex-notify-still-works
+  (testing "Existing notify pathway is not broken"
+    (let [dir (temp-dir)]
+      (try
+        (with-redefs [handler/current-pane-id
+                      (constantly "%23")]
+          (let [payload
+                (json/generate-string
+                 {:type "agent-turn-complete"
+                  :thread-id "notify-regression"
+                  :cwd "/tmp/work"
+                  :last-assistant-message "Still works."})
+                result (handler/handle-hook!
+                        dir "codex" nil payload)]
+            (is (= "notify-regression"
+                   (:session-id result)))
+            (is (= :running (:agent-status result)))
+            (is (= "Still works."
+                   (:last-message result)))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-codex-hooks-full-payload-fields
+  (testing "Codex hooks payload with all fields works correctly"
+    (let [dir (temp-dir)]
+      (try
+        (with-redefs [handler/current-pane-id
+                      (constantly "%30")]
+          (let [start-payload
+                (json/generate-string
+                 {:session_id "full-fields-1"
+                  :cwd "/home/user/project"
+                  :hook_event_name "SessionStart"
+                  :model "o4-mini"
+                  :permission_mode "default"
+                  :source "startup"
+                  :transcript_path "/home/user/.codex/transcript.json"})
+                result (handler/handle-hook!
+                        dir "codex" nil start-payload)]
+            (is (= "full-fields-1" (:session-id result)))
+            (is (= :codex (:agent-type result)))
+            (is (= :running (:agent-status result)))
+            (is (= "/home/user/project" (:cwd result)))
+            (is (not (contains? result :last-message)))
+            ;; Stop with full fields
+            (let [stop-payload
+                  (json/generate-string
+                   {:session_id "full-fields-1"
+                    :cwd "/home/user/project"
+                    :hook_event_name "Stop"
+                    :model "o4-mini"
+                    :permission_mode "default"
+                    :stop_hook_active true
+                    :transcript_path "/home/user/.codex/transcript.json"
+                    :last_assistant_message "Task completed."})
+                  stop-result (handler/handle-hook!
+                               dir "codex" nil stop-payload)]
+              (is (= :completed (:agent-status stop-result)))
+              (is (= "Task completed."
+                     (:last-message stop-result))))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-codex-hooks-stop-null-last-message
+  (testing "Codex hooks Stop with null last_assistant_message falls back to default"
+    (let [result (handler/normalize-event
+                  "codex" "Stop"
+                  {:session_id "null-msg-1"
+                   :cwd "/tmp/work"
+                   :hook_event_name "Stop"
+                   :last_assistant_message nil
+                   :model "o4-mini"
+                   :permission_mode "default"
+                   :stop_hook_active false})]
+      (is (= :completed (:agent-status result)))
+      (is (= "session ended" (:last-message result))))))
+
 (deftest test-store-key-falls-back-to-session-id
   (testing "handle-hook! falls back to session-id when no pane"
     (let [dir (temp-dir)]

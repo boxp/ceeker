@@ -213,9 +213,50 @@ Claude Code passes a JSON payload to command hooks via stdin. The payload contai
 
 Note: `InstructionsLoaded` is an event that is already asynchronous by design on the Claude Code side.
 
-### Codex
+### Codex (hooks — recommended, v0.114.0+)
 
-Add the following to `~/.codex/config.toml`:
+Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) supports an experimental hooks engine with `SessionStart` and `Stop` events. Add the following to `~/.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook codex SessionStart",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook codex Stop",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Codex hooks pass a JSON payload via stdin (same as Claude Code). The payload contains `session_id`, `cwd`, `hook_event_name`, `model`, `permission_mode`, and `transcript_path`. For `SessionStart`, `source` indicates whether the session was started fresh (`"startup"`) or resumed (`"resume"`). For `Stop`, ceeker also captures `last_assistant_message`.
+
+No changes to `~/.codex/config.toml` are needed — `hooks.json` is the only file required.
+
+> **Note:** The hooks engine is experimental. The `"async": true` option may not be supported in all Codex versions — if your version warns about async hooks, remove the `"async": true` line (hooks will run synchronously but ceeker's hook handler is fast enough not to block the agent loop noticeably).
+
+> **Migrating from notify:** If you were previously using the `notify` mechanism in `config.toml`, remove the `notify = ["ceeker", "hook", "codex"]` line after setting up `hooks.json` to avoid receiving duplicate events.
+
+### Codex (notify — fallback)
+
+If you are on a Codex version before v0.114.0, use the notify mechanism instead. Add the following to `~/.codex/config.toml`:
 
 ```toml
 notify = ["ceeker", "hook", "codex"]
