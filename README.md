@@ -215,7 +215,9 @@ Note: `InstructionsLoaded` is an event that is already asynchronous by design on
 
 ### Codex (hooks — recommended, v0.114.0+)
 
-Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) supports an experimental hooks engine with `SessionStart` and `Stop` events.
+Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) supports `SessionStart` and `Stop` events via its **experimental** hooks engine.
+
+> **Note:** The `codex_hooks` feature is currently **experimental** and its API may change in future releases.
 
 #### 1. Enable the feature flag
 
@@ -267,7 +269,7 @@ codex_hooks = true
 
 Codex hooks pass a JSON payload via stdin (same as Claude Code). The payload contains `session_id`, `cwd`, `hook_event_name`, `model`, `permission_mode`, and `transcript_path`. For `SessionStart`, `source` indicates whether the session was started fresh (`"startup"`) or resumed (`"resume"`). For `Stop`, ceeker also captures `last_assistant_message`.
 
-> **Current limitation — `async: false` required:** As of the current Codex release, `"async": true` is not yet supported. Setting it to `true` causes the hook to be skipped with the warning `⚠ skipping async hook ... async hooks are not supported yet`. Use `"async": false` — ceeker's hook handler is lightweight and will not noticeably block the agent loop.
+> **Temporary workaround — `async: false` required:** Ideally hooks should run asynchronously (`"async": true`) to avoid blocking the agent loop. However, as of Codex v0.114.0, async hooks are **not yet supported** — setting `"async": true` causes the hook to be skipped with the warning `⚠ skipping async hook ... async hooks are not supported yet`. As a temporary measure, use `"async": false`; ceeker's hook handler is lightweight and will not noticeably block the agent loop. **When Codex adds async hook support in a future release, you can switch back to `"async": true`.**
 
 > **Migrating from notify:** If you were previously using the `notify` mechanism in `config.toml`, remove the `notify = ["ceeker", "hook", "codex"]` line after setting up `hooks.json` to avoid receiving duplicate events.
 
@@ -276,7 +278,7 @@ Codex hooks pass a JSON payload via stdin (same as Claude Code). The payload con
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | No session appears in ceeker after starting Codex | Feature flag `codex_hooks` is not enabled | Run `codex features enable codex_hooks` or add `[features] codex_hooks = true` to `~/.codex/config.toml` |
-| `⚠ skipping async hook ... async hooks are not supported yet` | `"async": true` is set in `hooks.json` | Change to `"async": false` |
+| `⚠ skipping async hook ... async hooks are not supported yet` | `"async": true` is set in `hooks.json` (async hooks are not yet supported) | Change to `"async": false` as a temporary workaround |
 | Duplicate session events | Both `hooks.json` and `notify` in `config.toml` are active | Remove the `notify` line from `config.toml` |
 
 ### Codex (notify — fallback)

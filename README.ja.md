@@ -215,7 +215,9 @@ Claude Code は command hook の stdin に JSON payload を渡します。payloa
 
 ### Codex（hooks — 推奨、v0.114.0+）
 
-Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) は experimental hooks エンジンで `SessionStart` / `Stop` イベントをサポートしています。
+Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) は**実験的（experimental）**な hooks エンジンで `SessionStart` / `Stop` イベントをサポートしています。
+
+> **注意:** `codex_hooks` は現在**実験的な機能**であり、将来のリリースで API が変更される可能性があります。
 
 #### 1. Feature flag の有効化
 
@@ -267,7 +269,7 @@ codex_hooks = true
 
 Codex hooks は Claude Code と同様に stdin 経由で JSON payload を渡します。payload には `session_id`, `cwd`, `hook_event_name`, `model`, `permission_mode`, `transcript_path` が含まれます。`SessionStart` では `source` がセッション起動方法（`"startup"` / `"resume"`）を示します。`Stop` では `last_assistant_message` も取り込みます。
 
-> **現時点の制限 — `async: false` が必須:** 現在の Codex リリースでは `"async": true` は未サポートです。`true` に設定すると `⚠ skipping async hook ... async hooks are not supported yet` という警告が出て hook がスキップされます。`"async": false` を使用してください — ceeker の hook ハンドラは軽量なので agent loop への影響は軽微です。
+> **暫定的な回避策 — `async: false` が必須:** 本来は hook を非同期（`"async": true`）で実行し、agent loop をブロックしないことが望ましいですが、Codex v0.114.0 時点では async hooks は**未サポート**です。`true` に設定すると `⚠ skipping async hook ... async hooks are not supported yet` という警告が出て hook がスキップされます。暫定措置として `"async": false` を使用してください — ceeker の hook ハンドラは軽量なので agent loop への影響は軽微です。**将来 Codex が async hooks をサポートした際には `"async": true` に戻すことができます。**
 
 > **notify からの移行:** 以前 `config.toml` で `notify` を使用していた場合、`hooks.json` 設定後に `notify = ["ceeker", "hook", "codex"]` 行を削除してください。両方が有効だとイベントが重複します。
 
@@ -276,7 +278,7 @@ Codex hooks は Claude Code と同様に stdin 経由で JSON payload を渡し�
 | 症状 | 原因 | 対処法 |
 |------|------|--------|
 | Codex 起動後も ceeker にセッションが表示されない | Feature flag `codex_hooks` が未有効 | `codex features enable codex_hooks` を実行、または `~/.codex/config.toml` に `[features] codex_hooks = true` を追加 |
-| `⚠ skipping async hook ... async hooks are not supported yet` | `hooks.json` で `"async": true` が設定されている | `"async": false` に変更 |
+| `⚠ skipping async hook ... async hooks are not supported yet` | `hooks.json` で `"async": true` が設定されている（async hooks は未サポート） | 暫定的に `"async": false` に変更 |
 | セッションイベントが重複する | `hooks.json` と `config.toml` の `notify` が両方有効 | `config.toml` から `notify` 行を削除 |
 
 ### Codex（notify — フォールバック）
