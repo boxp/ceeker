@@ -246,9 +246,13 @@ Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) su
 }
 ```
 
-Codex hooks pass a JSON payload via stdin (same as Claude Code). The payload contains `session_id`, `cwd`, and `hook_event_name`. For `Stop`, ceeker also captures `last_assistant_message`.
+Codex hooks pass a JSON payload via stdin (same as Claude Code). The payload contains `session_id`, `cwd`, `hook_event_name`, `model`, `permission_mode`, and `transcript_path`. For `SessionStart`, `source` indicates whether the session was started fresh (`"startup"`) or resumed (`"resume"`). For `Stop`, ceeker also captures `last_assistant_message`.
+
+No changes to `~/.codex/config.toml` are needed — `hooks.json` is the only file required.
 
 > **Note:** The hooks engine is experimental. The `"async": true` option may not be supported in all Codex versions — if your version warns about async hooks, remove the `"async": true` line (hooks will run synchronously but ceeker's hook handler is fast enough not to block the agent loop noticeably).
+
+> **Migrating from notify:** If you were previously using the `notify` mechanism in `config.toml`, remove the `notify = ["ceeker", "hook", "codex"]` line after setting up `hooks.json` to avoid receiving duplicate events.
 
 ### Codex (notify — fallback)
 

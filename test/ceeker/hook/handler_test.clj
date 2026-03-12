@@ -642,6 +642,61 @@
         (finally
           (cleanup-dir dir))))))
 
+(deftest test-codex-hooks-full-payload-fields
+  (testing "Codex hooks payload with all fields (model, permission_mode, source, transcript_path) works correctly"
+    (let [dir (temp-dir)]
+      (try
+        (with-redefs [handler/current-pane-id
+                      (constantly "%30")]
+          (let [start-payload
+                (json/generate-string
+                 {:session_id "full-fields-1"
+                  :cwd "/home/user/project"
+                  :hook_event_name "SessionStart"
+                  :model "o4-mini"
+                  :permission_mode "default"
+                  :source "startup"
+                  :transcript_path "/home/user/.codex/transcript.json"})
+                result (handler/handle-hook!
+                        dir "codex" nil start-payload)]
+            (is (= "full-fields-1" (:session-id result)))
+            (is (= :codex (:agent-type result)))
+            (is (= :running (:agent-status result)))
+            (is (= "/home/user/project" (:cwd result)))
+            (is (not (contains? result :last-message)))
+            ;; Stop with full fields
+            (let [stop-payload
+                  (json/generate-string
+                   {:session_id "full-fields-1"
+                    :cwd "/home/user/project"
+                    :hook_event_name "Stop"
+                    :model "o4-mini"
+                    :permission_mode "default"
+                    :stop_hook_active true
+                    :transcript_path "/home/user/.codex/transcript.json"
+                    :last_assistant_message "Task completed."})
+                  stop-result (handler/handle-hook!
+                               dir "codex" nil stop-payload)]
+              (is (= :completed (:agent-status stop-result)))
+              (is (= "Task completed."
+                     (:last-message stop-result))))))
+        (finally
+          (cleanup-dir dir))))))
+
+(deftest test-codex-hooks-stop-null-last-message
+  (testing "Codex hooks Stop with null last_assistant_message falls back to default"
+    (let [result (handler/normalize-event
+                  "codex" "Stop"
+                  {:session_id "null-msg-1"
+                   :cwd "/tmp/work"
+                   :hook_event_name "Stop"
+                   :last_assistant_message nil
+                   :model "o4-mini"
+                   :permission_mode "default"
+                   :stop_hook_active false})]
+      (is (= :completed (:agent-status result)))
+      (is (= "session ended" (:last-message result))))))
+
 (deftest test-store-key-falls-back-to-session-id
   (testing "handle-hook! falls back to session-id when no pane"
     (let [dir (temp-dir)]
