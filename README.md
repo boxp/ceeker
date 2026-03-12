@@ -213,9 +213,46 @@ Claude Code passes a JSON payload to command hooks via stdin. The payload contai
 
 Note: `InstructionsLoaded` is an event that is already asynchronous by design on the Claude Code side.
 
-### Codex
+### Codex (hooks — recommended, v0.114.0+)
 
-Add the following to `~/.codex/config.toml`:
+Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) supports an experimental hooks engine with `SessionStart` and `Stop` events. Add the following to `~/.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook codex SessionStart",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook codex Stop",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Codex hooks pass a JSON payload via stdin (same as Claude Code). The payload contains `session_id`, `cwd`, and `hook_event_name`. For `Stop`, ceeker also captures `last_assistant_message`.
+
+> **Note:** The hooks engine is experimental. The `"async": true` option may not be supported in all Codex versions — if your version warns about async hooks, remove the `"async": true` line (hooks will run synchronously but ceeker's hook handler is fast enough not to block the agent loop noticeably).
+
+### Codex (notify — fallback)
+
+If you are on a Codex version before v0.114.0, use the notify mechanism instead. Add the following to `~/.codex/config.toml`:
 
 ```toml
 notify = ["ceeker", "hook", "codex"]

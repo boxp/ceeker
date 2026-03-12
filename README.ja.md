@@ -213,9 +213,46 @@ Claude Code は command hook の stdin に JSON payload を渡します。payloa
 
 補足: `InstructionsLoaded` は Claude Code 側仕様で最初から非同期イベントです。
 
-### Codex
+### Codex（hooks — 推奨、v0.114.0+）
 
-`~/.codex/config.toml` に以下を追加:
+Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) は experimental hooks エンジンで `SessionStart` / `Stop` イベントをサポートしています。`~/.codex/hooks.json` に以下を追加:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook codex SessionStart",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ceeker hook codex Stop",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Codex hooks は Claude Code と同様に stdin 経由で JSON payload を渡します。payload には `session_id`, `cwd`, `hook_event_name` が含まれます。`Stop` では `last_assistant_message` も取り込みます。
+
+> **補足:** hooks エンジンは experimental です。`"async": true` オプションが未サポートのバージョンでは警告が出る場合があります。その場合は `"async": true` 行を削除してください（同期実行になりますが、ceeker の hook ハンドラは軽量なので agent loop への影響は軽微です）。
+
+### Codex（notify — フォールバック）
+
+v0.114.0 より前の Codex を使用している場合は、notify 方式を使用してください。`~/.codex/config.toml` に以下を追加:
 
 ```toml
 notify = ["ceeker", "hook", "codex"]
