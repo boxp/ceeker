@@ -17,12 +17,20 @@
 (def ^:private ansi-magenta "\033[35m")
 
 (def ^:const compact-threshold
-  "Terminal width (columns) below which compact card view is used."
-  80)
+  "Terminal width (columns) below which compact card view is used.
+   Derived from table row width: prefix(4) + columns + gaps = ~98."
+  100)
 
 (def ^:const max-card-message-lines
   "Maximum number of message lines shown in a card."
   3)
+
+;; Table column widths (display-width units).
+(def ^:const col-width-agent 9)
+(def ^:const col-width-status 11)
+(def ^:const col-width-worktree 14)
+(def ^:const col-width-message 44)
+(def ^:private col-gap "  ")
 
 (defn- clear-screen []
   "\033[2J\033[H")
@@ -171,17 +179,18 @@
   "Builds column values for a table row as a single string."
   [session]
   (let [agent (pad-to-width
-               (agent-badge (:agent-type session)) 9)
+               (agent-badge (:agent-type session)) col-width-agent)
         status (pad-to-width
-                (status-badge (:agent-status session)) 11)
-        wt (pad-to-width
-            (or (cwd-short-name (:cwd session)) "") 14)
+                (status-badge (:agent-status session)) col-width-status)
+        wt (-> (or (cwd-short-name (:cwd session)) "")
+               (truncate-by-width col-width-worktree)
+               (pad-to-width col-width-worktree))
         msg (-> (:last-message session)
                 normalize-message
-                (truncate-by-width 44)
-                (pad-to-width 44))]
-    (str agent " " status " "
-         wt " " msg " "
+                (truncate-by-width col-width-message)
+                (pad-to-width col-width-message))]
+    (str agent col-gap status col-gap
+         wt col-gap msg col-gap
          (format-time (:last-updated session)))))
 
 (defn- format-session-line
@@ -268,10 +277,10 @@
 (defn- column-headers []
   (str ansi-dim
        "   "
-       (pad-to-width "AGENT" 9) " "
-       (pad-to-width "STATUS" 11) " "
-       (pad-to-width "WORKTREE" 14) " "
-       (pad-to-width "MESSAGE" 44) " "
+       (pad-to-width "AGENT" col-width-agent) col-gap
+       (pad-to-width "STATUS" col-width-status) col-gap
+       (pad-to-width "WORKTREE" col-width-worktree) col-gap
+       (pad-to-width "MESSAGE" col-width-message) col-gap
        "UPDATED"
        ansi-reset))
 
