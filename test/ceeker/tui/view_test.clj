@@ -527,7 +527,10 @@
           ;; "AGENT" (5) padded to col-width-agent (9) = "AGENT    ", then "  " gap
           ;; "WORKTREE" (8) padded to col-width-worktree (14) = "WORKTREE      ", then "  " gap
           agent-padded (str "AGENT" (apply str (repeat (- view/col-width-agent 5) \space)))
-          worktree-padded (str "WORKTREE" (apply str (repeat (- view/col-width-worktree 8) \space)))]
+          worktree-padded (str "WORKTREE"
+                               (apply str
+                                      (repeat (- view/col-width-worktree 8)
+                                              \space)))]
       (is (str/includes? header (str agent-padded "  " "STATUS"))
           "AGENT column (padded) and STATUS should be separated by col-gap (2 spaces)")
       (is (str/includes? header (str worktree-padded "  " "MESSAGE"))
