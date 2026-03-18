@@ -489,3 +489,41 @@
                        (.format (DateTimeFormatter/ofPattern
                                  "HH:mm:ss")))]
       (is (= expected (#'view/format-time utc-ts))))))
+
+;; -- worktree truncation tests --
+
+(deftest test-long-worktree-truncated-in-table
+  (testing "long worktree name is truncated and does not shift columns"
+    (let [session (assoc (make-session "hello")
+                         :cwd "/home/user/very-long-project-name-here")
+          line (strip-ansi
+                (#'view/format-session-line session false))]
+      (is (str/includes? line "…")
+          "Long worktree should be truncated with ellipsis")
+      (is (str/includes? line "hello")
+          "Message column should still be visible"))))
+
+(deftest test-long-worktree-same-column-offset
+  (testing "short and long worktree produce same message column offset"
+    (let [s-short (assoc (make-session "test-msg")
+                         :cwd "/home/user/proj")
+          s-long (assoc (make-session "test-msg")
+                        :cwd "/home/user/extremely-long-directory-name")
+          line-short (strip-ansi
+                      (#'view/format-session-line s-short false))
+          line-long (strip-ansi
+                     (#'view/format-session-line s-long false))
+          pos-short (str/index-of line-short "test-msg")
+          pos-long (str/index-of line-long "test-msg")]
+      (is (some? pos-short))
+      (is (some? pos-long))
+      (is (= pos-short pos-long)
+          "Message column must start at same position regardless of worktree length"))))
+
+(deftest test-column-gap-is-two-spaces
+  (testing "column headers use double-space gap between columns"
+    (let [header (strip-ansi (#'view/column-headers))]
+      (is (str/includes? header "AGENT  STATUS")
+          "AGENT and STATUS should be separated by two spaces (after padding)")
+      (is (str/includes? header "WORKTREE  MESSAGE")
+          "WORKTREE and MESSAGE should be separated by two spaces (after padding)"))))
