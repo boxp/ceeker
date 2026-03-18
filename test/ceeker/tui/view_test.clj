@@ -521,9 +521,14 @@
           "Message column must start at same position regardless of worktree length"))))
 
 (deftest test-column-gap-is-two-spaces
-  (testing "column headers use double-space gap between columns"
-    (let [header (strip-ansi (#'view/column-headers))]
-      (is (str/includes? header "AGENT  STATUS")
-          "AGENT and STATUS should be separated by two spaces (after padding)")
-      (is (str/includes? header "WORKTREE  MESSAGE")
-          "WORKTREE and MESSAGE should be separated by two spaces (after padding)"))))
+  (testing "column headers use double-space gap between padded columns"
+    (let [header (strip-ansi (#'view/column-headers))
+          ;; Each column name is padded to its fixed width, then col-gap (2 spaces) follows.
+          ;; "AGENT" (5) padded to col-width-agent (9) = "AGENT    ", then "  " gap
+          ;; "WORKTREE" (8) padded to col-width-worktree (14) = "WORKTREE      ", then "  " gap
+          agent-padded (str "AGENT" (apply str (repeat (- view/col-width-agent 5) \space)))
+          worktree-padded (str "WORKTREE" (apply str (repeat (- view/col-width-worktree 8) \space)))]
+      (is (str/includes? header (str agent-padded "  " "STATUS"))
+          "AGENT column (padded) and STATUS should be separated by col-gap (2 spaces)")
+      (is (str/includes? header (str worktree-padded "  " "MESSAGE"))
+          "WORKTREE column (padded) and MESSAGE should be separated by col-gap (2 spaces)"))))
