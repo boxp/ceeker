@@ -304,9 +304,9 @@
 (defn- tui-loop
   "Main TUI render-input loop.
    Pane checks run in a separate async/thread worker."
-  [terminal w state-dir exit-on-jump?]
+  [terminal w state-dir exit-on-jump? initial-display-mode]
   (loop [sel 0 msg nil fs f/empty-filter
-         sm? false sb nil display-mode :auto]
+         sm? false sb nil display-mode initial-display-mode]
     (let [{:keys [key cl visible mx]}
           (render-and-read terminal w state-dir
                            sel msg fs sm? sb
@@ -321,16 +321,20 @@
 (defn start-tui!
   "Runs the TUI application loop.
    opts may include :exit-on-jump to quit after a
-   successful jump."
+   successful jump and :initial-display-mode to
+   set the startup view."
   ([] (start-tui! nil))
   ([state-dir] (start-tui! state-dir {}))
   ([state-dir opts]
    (let [terminal (input/create-terminal)
          w (create-watcher-for state-dir)
          stop-ch (start-pane-checker! state-dir)
-         exit-on-jump? (:exit-on-jump opts)]
+         exit-on-jump? (:exit-on-jump opts)
+         initial-display-mode (:initial-display-mode
+                               opts :auto)]
      (try
-       (tui-loop terminal w state-dir exit-on-jump?)
+       (tui-loop terminal w state-dir exit-on-jump?
+                 initial-display-mode)
        (finally
          (async/close! stop-ch)
          (print "\033[2J\033[H")

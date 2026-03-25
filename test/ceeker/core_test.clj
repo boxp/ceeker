@@ -2,7 +2,8 @@
   (:require [ceeker.core :as core]
             [ceeker.tui.view :as view]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing]]
+            [clojure.tools.cli :as cli]))
 
 (deftest version-is-loaded
   (testing "version reads from CEEKER_VERSION resource"
@@ -87,3 +88,34 @@
     (is (str/includes? (view/render [] 0 120 :auto) "View:Auto"))
     (is (str/includes? (view/render [] 0 120 :table) "View:Table"))
     (is (str/includes? (view/render [] 0 120 :card) "View:Card"))))
+
+(deftest cli-accepts-view-option
+  (testing "--view accepts supported startup views"
+    (doseq [mode ["auto" "table" "card"]]
+      (let [{:keys [errors options]} (cli/parse-opts
+                                      ["--view" mode]
+                                      core/cli-options
+                                      :in-order true)]
+        (is (nil? errors))
+        (is (= (keyword mode)
+               (:view options)))))))
+
+(deftest cli-rejects-invalid-view-option
+  (testing "--view rejects unsupported startup views"
+    (let [{:keys [errors]} (cli/parse-opts
+                            ["--view" "grid"]
+                            core/cli-options
+                            :in-order true)]
+      (is (= 1 (count errors)))
+      (is (str/includes? (first errors) "--view"))
+      (is (str/includes? (first errors)
+                         "Must be one of: auto, table, card")))))
+
+(deftest cli-view-option-defaults-to-auto
+  (testing "--view defaults to :auto when omitted"
+    (let [{:keys [errors options]} (cli/parse-opts
+                                    []
+                                    core/cli-options
+                                    :in-order true)]
+      (is (nil? errors))
+      (is (= :auto (:view options))))))
