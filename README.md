@@ -117,6 +117,15 @@ With `--exit-on-jump`, ceeker exits automatically after a successful jump. This 
 ceeker --exit-on-jump
 ```
 
+### Startup View
+
+With `--view`, you can choose the initial layout at startup. Supported values are `auto`, `table`, and `card`.
+
+```bash
+ceeker --view table
+ceeker --view card
+```
+
 ## Handy tmux configuration
 
 You can open ceeker as a popup from anywhere inside tmux. Combine with `--exit-on-jump` so the popup closes automatically after you select a pane.

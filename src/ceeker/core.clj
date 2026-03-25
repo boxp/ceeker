@@ -15,6 +15,11 @@
 (def cli-options
   [["-h" "--help" "Show help"]
    ["-V" "--version" "Show version"]
+   [nil "--view MODE" "Startup view: auto | table | card"
+    :default :auto
+    :parse-fn keyword
+    :validate [#{:auto :table :card}
+               "Must be one of: auto, table, card"]]
    [nil "--exit-on-jump" "Exit after a successful jump"]])
 
 (defn- usage
@@ -132,5 +137,6 @@
        :else
        (do (tui/start-tui!
             nil
-            {:exit-on-jump (:exit-on-jump options)})
+            {:exit-on-jump (:exit-on-jump options)
+             :initial-display-mode (:view options)})
            (System/exit 0))))))

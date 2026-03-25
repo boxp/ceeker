@@ -2,6 +2,8 @@
   (:require [ceeker.tmux.pane :as pane]
             [ceeker.tui.app :as app]
             [ceeker.tui.filter :as f]
+            [ceeker.tui.input]
+            [ceeker.tui.watcher]
             [clojure.core.async :as async]
             [clojure.test :refer [deftest is testing]]))
 
@@ -407,3 +409,28 @@
                     :auto true)]
         (is (not (:quit result)))
         (is (string? (:msg result)))))))
+
+(deftest test-start-tui-passes-initial-display-mode
+  (testing "start-tui! passes configured startup view into tui-loop"
+    (let [received (atom nil)
+          stop-ch (async/chan)]
+      (with-redefs [ceeker.tui.app/create-watcher-for
+                    (fn [_] nil)
+                    ceeker.tui.app/start-pane-checker!
+                    (fn [_] stop-ch)
+                    ceeker.tui.input/create-terminal
+                    (fn [] ::terminal)
+                    ceeker.tui.input/close-terminal
+                    (fn [_])
+                    ceeker.tui.watcher/close-watcher
+                    (fn [_])
+                    ceeker.tui.app/tui-loop
+                    (fn [terminal w state-dir exit-on-jump?
+                         initial-display-mode]
+                      (reset! received [terminal w state-dir
+                                        exit-on-jump?
+                                        initial-display-mode]))]
+        (app/start-tui! nil {:exit-on-jump true
+                             :initial-display-mode :card})
+        (is (= [::terminal nil nil true :card]
+               @received))))))
