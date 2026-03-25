@@ -44,6 +44,32 @@
                     (:out result))))))
     (catch Exception _ nil)))
 
+(defn- ps-command-line
+  "Returns process command line from ps, or nil on failure."
+  [pid]
+  (let [result (try
+                 (shell/sh "ps" "-p" (str pid) "-o"
+                           "command=")
+                 (catch Exception _ nil))]
+    (when (and result (zero? (:exit result)))
+      (str/trim (:out result)))))
+
+(defn- process-handle-command-line
+  "Returns process command line from ProcessHandle info, or nil."
+  [pid]
+  (when-let [handle (.orElse
+                     (java.lang.ProcessHandle/of
+                      (Long/parseLong (str pid)))
+                     nil)]
+    (let [info (.info handle)
+          command (.orElse (.command info) nil)
+          arguments (.orElse (.arguments info) nil)]
+      (when (seq command)
+        (str/trim
+         (str/join " "
+                   (cons command
+                         (or arguments []))))))))
+
 (defn- read-proc-cmdline
   "Reads /proc/<pid>/cmdline on Linux, falls back to ps on
    macOS. Returns the command string or nil on failure."
@@ -52,11 +78,8 @@
     (let [f (io/file (str "/proc/" pid "/cmdline"))]
       (if (.exists f)
         (str/replace (slurp f) "\0" " ")
-        (let [result (shell/sh
-                      "ps" "-p" (str pid) "-o"
-                      "command=")]
-          (when (zero? (:exit result))
-            (str/trim (:out result))))))
+        (or (ps-command-line pid)
+            (process-handle-command-line pid))))
     (catch Exception _ nil)))
 
 (defn- child-pids

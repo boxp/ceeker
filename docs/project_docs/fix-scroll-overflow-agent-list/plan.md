@@ -30,6 +30,21 @@ agent 数が増えると ceeker の一覧表示が terminal height を超え、�
 1. table view で overflow 時に選択行を含む window だけ表示されることを検証
 2. card view で overflow 時に選択 card が可視になることを検証
 
+### Makefile
+
+1. `make test` 実行時に `TMUX` / `TMUX_PANE` を外し、隔離した `TMUX_TMPDIR` を使うよう変更
+2. local で常駐 tmux server の影響を受けずにテストが走るよう調整
+
+### src/ceeker/tmux/pane.clj
+
+1. `read-proc-cmdline` に `ProcessHandle.Info` フォールバックを追加
+2. `ps` が sandbox や macOS 環境で読めない場合でも process tree 判定を継続可能にした
+
+### src/ceeker/tui/watcher.clj / test/ceeker/tui/watcher_test.clj
+
+1. `WatchService` のイベントが来ない環境向けに mtime fallback を追加
+2. watcher test は共有 state dir ではなく temp dir を使うよう変更
+
 ## Verification
 
 - `clojure -M:test -n ceeker.tui.view-test`
@@ -39,5 +54,6 @@ agent 数が増えると ceeker の一覧表示が terminal height を超え、�
 ## Current Status
 
 - 追加した TUI 関連テストは通過
-- `make ci` は今回の変更と無関係な既存 3 テスト失敗で停止
-- GitHub Actions 上では 2026-03-25 時点の `main` 最新 CI は通過しているように見えるため、PR 上の CI で差分影響を確認する
+- local だけ失敗していた 3 テストは、tmux 隔離と環境差吸収で解消
+- local `make ci` は通過
+- PR CI も通過しているため、変更は local / CI の両方で整合した状態

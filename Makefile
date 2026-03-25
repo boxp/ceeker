@@ -2,7 +2,8 @@
 
 test: test-install-script
 	mkdir -p target/test-runtime
-	XDG_RUNTIME_DIR=$(CURDIR)/target/test-runtime clojure -M:test
+	mkdir -p target/test-runtime/tmux
+	TMUX= TMUX_PANE= TMUX_TMPDIR=$(CURDIR)/target/test-runtime/tmux XDG_RUNTIME_DIR=$(CURDIR)/target/test-runtime clojure -M:test
 
 test-install-script:
 	sh test/install_script_test.sh
