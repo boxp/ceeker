@@ -327,33 +327,153 @@
        (fn [i s] (format-session-line s (= i sel)))
        sorted))))
 
+(defn- wrapped-line-count
+  "Returns the number of terminal lines needed for a single rendered line."
+  [rendered-line width]
+  (let [line-width (str-display-width rendered-line)
+        width (max 1 width)]
+    (max 1 (quot (+ line-width (dec width)) width))))
+
+(defn- rendered-terminal-line-count
+  "Returns the number of terminal lines used by a rendered block."
+  [rendered width]
+  (transduce
+   (map #(wrapped-line-count % width))
+   +
+   0
+   (str/split (or rendered "") #"\n" -1)))
+
+(defn- truncate-rendered-block
+  "Truncates a rendered block to max-lines terminal lines."
+  [rendered max-lines]
+  (->> (str/split (or rendered "") #"\n" -1)
+       (take (max 0 max-lines))
+       (str/join "\n")))
+
+(defn- grow-visible-window
+  "Expands the visible block window around selected within available-lines."
+  [blocks heights selected available-lines]
+  (loop [start selected
+         end selected
+         used (nth heights selected)]
+    (let [prev-idx (dec start)
+          next-idx (inc end)
+          prev-height (when (<= 0 prev-idx)
+                        (nth heights prev-idx))
+          next-height (when (< next-idx (count blocks))
+                        (nth heights next-idx))]
+      (cond
+        (and prev-height
+             (<= (+ used prev-height) available-lines))
+        (recur prev-idx end (+ used prev-height))
+
+        (and next-height
+             (<= (+ used next-height) available-lines))
+        (recur start next-idx (+ used next-height))
+
+        :else
+        (subvec blocks start (inc end))))))
+
+(defn- select-visible-overflow-blocks
+  "Selects visible blocks for an overflowing list."
+  [blocks heights selected available-lines]
+  (let [selected-block (nth blocks selected)
+        selected-height (nth heights selected)]
+    (if (> selected-height available-lines)
+      [(truncate-rendered-block selected-block available-lines)]
+      (grow-visible-window blocks heights selected
+                           available-lines))))
+
+(defn- visible-session-blocks
+  "Returns the subset of rendered session blocks visible within available-lines.
+   The selected block is kept in view. Blocks are clipped only when a single
+   block is taller than the available space."
+  [blocks sel available-lines width]
+  (let [blocks (vec blocks)]
+    (cond
+      (empty? blocks) blocks
+      (nil? available-lines) blocks
+      (not (pos? available-lines)) []
+      :else
+      (let [heights (mapv #(rendered-terminal-line-count % width)
+                          blocks)
+            total-lines (reduce + heights)
+            max-idx (dec (count blocks))
+            selected (max 0 (min sel max-idx))]
+        (if (<= total-lines available-lines)
+          blocks
+          (select-visible-overflow-blocks blocks heights
+                                          selected
+                                          available-lines))))))
+
+(defn- render-body-lines
+  "Builds session area lines including table headers when needed."
+  [visible-blocks compact? width]
+  (if compact?
+    visible-blocks
+    (concat
+     [(column-headers) (separator-line width)]
+     visible-blocks)))
+
+(defn- render-screen-lines
+  "Builds all lines for the current screen."
+  [sessions sorted fs mode sm? sb width compact?
+   visible-blocks]
+  (concat
+   [(clear-screen)
+    (header-line (count sessions) (count sorted) fs)
+    (separator-line width)]
+   (render-body-lines visible-blocks compact? width)
+   [(separator-line width)
+    (footer-line mode sm? sb)]))
+
+(defn- chrome-blocks
+  "Returns rendered non-session blocks used to compute height budget."
+  [sessions sorted fs mode sm? sb width compact?]
+  (render-screen-lines sessions sorted fs mode sm? sb
+                       width compact? []))
+
+(defn- available-session-lines
+  "Returns the terminal line budget for session blocks."
+  [terminal-height sessions sorted fs mode sm? sb width
+   compact?]
+  (when terminal-height
+    (- terminal-height
+       (transduce
+        (map #(rendered-terminal-line-count % width))
+        +
+        0
+        (chrome-blocks sessions sorted fs mode sm? sb
+                       width compact?)))))
+
 (defn render
   "Renders the full TUI screen."
   ([sessions sel]
-   (render sessions sel 120 :auto f/empty-filter false nil))
+   (render sessions sel 120 nil :auto f/empty-filter false nil))
   ([sessions sel terminal-width display-mode]
-   (render sessions sel terminal-width display-mode
+   (render sessions sel terminal-width nil display-mode
            f/empty-filter false nil))
   ([sessions sel terminal-width display-mode fs sm? sb]
+   (render sessions sel terminal-width nil display-mode
+           fs sm? sb))
+  ([sessions sel terminal-width terminal-height display-mode
+    fs sm? sb]
    (let [width (or terminal-width 120)
          mode (or display-mode :auto)
          fs* (or fs f/empty-filter)
          filtered (f/apply-filters fs* sessions)
          sorted (sort-for-display filtered)
-         compact? (use-compact? mode width)]
-     (str/join
-      "\n"
-      (concat
-       [(clear-screen)
-        (header-line (count sessions) (count sorted) fs*)
-        (separator-line width)]
-       (if compact?
-         (session-lines sorted sel true width)
-         (concat
-          [(column-headers) (separator-line width)]
-          (session-lines sorted sel false width)))
-       [(separator-line width)
-        (footer-line mode sm? sb)])))))
+         compact? (use-compact? mode width)
+         available-lines (available-session-lines
+                          terminal-height sessions sorted
+                          fs* mode sm? sb width compact?)
+         visible-blocks (visible-session-blocks
+                         (session-lines sorted sel compact? width)
+                         sel available-lines width)]
+     (str/join "\n"
+               (render-screen-lines sessions sorted fs*
+                                    mode sm? sb width
+                                    compact? visible-blocks)))))
 
 (defn render-error [message]
   (str "\n" ansi-red "  Error: " message ansi-reset))
