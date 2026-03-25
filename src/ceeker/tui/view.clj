@@ -327,15 +327,21 @@
        (fn [i s] (format-session-line s (= i sel)))
        sorted))))
 
-(defn- layout-line-count
-  "Returns the number of lines used by the static screen chrome."
-  [compact?]
-  (if compact? 5 7))
+(defn- wrapped-line-count
+  "Returns the number of terminal lines needed for a single rendered line."
+  [rendered-line width]
+  (let [line-width (str-display-width rendered-line)
+        width (max 1 width)]
+    (max 1 (quot (+ line-width (dec width)) width))))
 
-(defn- rendered-line-count
+(defn- rendered-terminal-line-count
   "Returns the number of terminal lines used by a rendered block."
-  [rendered]
-  (count (str/split (or rendered "") #"\n" -1)))
+  [rendered width]
+  (transduce
+   (map #(wrapped-line-count % width))
+   +
+   0
+   (str/split (or rendered "") #"\n" -1)))
 
 (defn- truncate-rendered-block
   "Truncates a rendered block to max-lines terminal lines."
@@ -382,14 +388,15 @@
   "Returns the subset of rendered session blocks visible within available-lines.
    The selected block is kept in view. Blocks are clipped only when a single
    block is taller than the available space."
-  [blocks sel available-lines]
+  [blocks sel available-lines width]
   (let [blocks (vec blocks)]
     (cond
       (empty? blocks) blocks
       (nil? available-lines) blocks
       (not (pos? available-lines)) []
       :else
-      (let [heights (mapv rendered-line-count blocks)
+      (let [heights (mapv #(rendered-terminal-line-count % width)
+                          blocks)
             total-lines (reduce + heights)
             max-idx (dec (count blocks))
             selected (max 0 (min sel max-idx))]
@@ -420,6 +427,25 @@
    [(separator-line width)
     (footer-line mode sm? sb)]))
 
+(defn- chrome-blocks
+  "Returns rendered non-session blocks used to compute height budget."
+  [sessions sorted fs mode sm? sb width compact?]
+  (render-screen-lines sessions sorted fs mode sm? sb
+                       width compact? []))
+
+(defn- available-session-lines
+  "Returns the terminal line budget for session blocks."
+  [terminal-height sessions sorted fs mode sm? sb width
+   compact?]
+  (when terminal-height
+    (- terminal-height
+       (transduce
+        (map #(rendered-terminal-line-count % width))
+        +
+        0
+        (chrome-blocks sessions sorted fs mode sm? sb
+                       width compact?)))))
+
 (defn render
   "Renders the full TUI screen."
   ([sessions sel]
@@ -438,12 +464,12 @@
          filtered (f/apply-filters fs* sessions)
          sorted (sort-for-display filtered)
          compact? (use-compact? mode width)
-         available-lines (when terminal-height
-                           (- terminal-height
-                              (layout-line-count compact?)))
+         available-lines (available-session-lines
+                          terminal-height sessions sorted
+                          fs* mode sm? sb width compact?)
          visible-blocks (visible-session-blocks
                          (session-lines sorted sel compact? width)
-                         sel available-lines)]
+                         sel available-lines width)]
      (str/join "\n"
                (render-screen-lines sessions sorted fs*
                                     mode sm? sb width

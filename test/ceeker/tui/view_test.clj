@@ -563,3 +563,16 @@
       (is (str/includes? plain "message-3"))
       (is (not (str/includes? plain "project-0")))
       (is (not (str/includes? plain "message-0"))))))
+
+(deftest test-render-height-budget-accounts-for-wrapped-footer
+  (testing "narrow card view accounts for wrapped chrome lines"
+    (let [sessions (mapv make-session-with-index (range 4))
+          width 40
+          height 10
+          output (view/render sessions 3 width height :card
+                              f/empty-filter false nil)
+          plain (strip-ansi output)]
+      (is (<= (#'view/rendered-terminal-line-count output width)
+              height))
+      (is (str/includes? plain "project-3"))
+      (is (not (str/includes? plain "project-0"))))))
