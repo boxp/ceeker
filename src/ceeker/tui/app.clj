@@ -128,6 +128,12 @@
   (let [w (.getWidth terminal)]
     (if (pos? w) w 120)))
 
+(defn- get-terminal-height
+  "Gets the current terminal height from a JLine terminal."
+  [^org.jline.terminal.Terminal terminal]
+  (let [h (.getHeight terminal)]
+    (if (pos? h) h 40)))
+
 (defn- next-display-mode
   "Cycles display mode: :auto -> :table -> :card -> :auto."
   [current]
@@ -140,9 +146,11 @@
 (defn- render-screen
   "Renders the screen with sessions and message."
   [sessions sel filt sm? sb msg terminal-width
+   terminal-height
    display-mode]
   (str (view/render sessions sel terminal-width
-                    display-mode filt sm? sb)
+                    terminal-height display-mode
+                    filt sm? sb)
        (when msg (str "\n" msg))))
 
 (defn- handle-enter-key
@@ -285,8 +293,9 @@
         mx (max 0 (dec (count visible)))
         cl (clamp sel 0 mx)
         width (get-terminal-width terminal)
+        height (get-terminal-height terminal)
         scr (render-screen sessions cl fs sm? sb msg
-                           width display-mode)]
+                           width height display-mode)]
     (print scr)
     (flush)
     {:key (wait-for-input terminal w)

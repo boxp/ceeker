@@ -1,5 +1,6 @@
 (ns ceeker.tui.view-test
-  (:require [ceeker.tui.view :as view]
+  (:require [ceeker.tui.filter :as f]
+            [ceeker.tui.view :as view]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
   (:import [java.time Instant ZoneId]
@@ -535,3 +536,30 @@
           "AGENT column (padded) and STATUS should be separated by col-gap (2 spaces)")
       (is (str/includes? header (str worktree-padded "  " "MESSAGE"))
           "WORKTREE column (padded) and MESSAGE should be separated by col-gap (2 spaces)"))))
+
+(defn- make-session-with-index [idx]
+  (assoc (make-session (str "message-" idx))
+         :cwd (str "/tmp/project-" idx)
+         :last-updated (format "2025-01-01T12:34:%02d.000Z" idx)))
+
+(deftest test-render-table-scrolls-with-selection
+  (testing "table view shows only the visible window and keeps selected row visible"
+    (let [sessions (mapv make-session-with-index (range 8))
+          output (view/render sessions 7 120 12 :table
+                              f/empty-filter false nil)
+          plain (strip-ansi output)]
+      (is (str/includes? plain "project-7"))
+      (is (str/includes? plain "message-7"))
+      (is (not (str/includes? plain "project-0")))
+      (is (not (str/includes? plain "message-0"))))))
+
+(deftest test-render-card-scrolls-with-selection
+  (testing "card view shows the selected card when sessions exceed terminal height"
+    (let [sessions (mapv make-session-with-index (range 4))
+          output (view/render sessions 3 80 10 :card
+                              f/empty-filter false nil)
+          plain (strip-ansi output)]
+      (is (str/includes? plain "project-3"))
+      (is (str/includes? plain "message-3"))
+      (is (not (str/includes? plain "project-0")))
+      (is (not (str/includes? plain "message-0"))))))
