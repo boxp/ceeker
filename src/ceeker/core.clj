@@ -15,7 +15,9 @@
 (def cli-options
   [["-h" "--help" "Show help"]
    ["-V" "--version" "Show version"]
-   [nil "--exit-on-jump" "Exit after a successful jump"]])
+   [nil "--exit-on-jump" "Exit after a successful jump"]
+   [nil "--startup-profile"
+    "Log startup profiling to stderr"]])
 
 (defn- usage
   "Returns usage string."
@@ -132,5 +134,6 @@
        :else
        (do (tui/start-tui!
             nil
-            {:exit-on-jump (:exit-on-jump options)})
+            {:exit-on-jump (:exit-on-jump options)
+             :startup-profile (:startup-profile options)})
            (System/exit 0))))))

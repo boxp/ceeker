@@ -128,6 +128,56 @@
   (let [w (.getWidth terminal)]
     (if (pos? w) w 120)))
 
+(defn- elapsed-ms
+  "Returns elapsed milliseconds since started-at."
+  [started-at]
+  (/ (- (System/nanoTime) started-at) 1000000.0))
+
+(defn- timed-step
+  "Runs f and returns its result plus elapsed time."
+  [f]
+  (let [started-at (System/nanoTime)
+        result (f)]
+    {:result result
+     :elapsed-ms (elapsed-ms started-at)}))
+
+(defn- log-startup-profile!
+  "Logs startup profiling summary to stderr."
+  [{:keys [create-terminal create-watcher
+           start-pane-checker total]}]
+  (binding [*out* *err*]
+    (println
+     (str "ceeker: startup-profile "
+          "create-terminal="
+          (format "%.2fms" create-terminal)
+          " create-watcher="
+          (format "%.2fms" create-watcher)
+          " start-pane-checker="
+          (format "%.2fms" start-pane-checker)
+          " total="
+          (format "%.2fms" total)))))
+
+(declare create-watcher-for)
+
+(defn- setup-runtime
+  "Creates startup resources and optionally logs timings."
+  [state-dir startup-profile?]
+  (let [started-at (System/nanoTime)
+        terminal-step (timed-step input/create-terminal)
+        watcher-step (timed-step
+                      #(create-watcher-for state-dir))
+        checker-step (timed-step
+                      #(start-pane-checker! state-dir))]
+    (when startup-profile?
+      (log-startup-profile!
+       {:create-terminal (:elapsed-ms terminal-step)
+        :create-watcher (:elapsed-ms watcher-step)
+        :start-pane-checker (:elapsed-ms checker-step)
+        :total (elapsed-ms started-at)}))
+    {:terminal (:result terminal-step)
+     :watcher (:result watcher-step)
+     :stop-ch (:result checker-step)}))
+
 (defn- get-terminal-height
   "Gets the current terminal height from a JLine terminal."
   [^org.jline.terminal.Terminal terminal]
@@ -321,19 +371,20 @@
 (defn start-tui!
   "Runs the TUI application loop.
    opts may include :exit-on-jump to quit after a
-   successful jump."
+   successful jump and :startup-profile to log
+   startup timings."
   ([] (start-tui! nil))
   ([state-dir] (start-tui! state-dir {}))
   ([state-dir opts]
-   (let [terminal (input/create-terminal)
-         w (create-watcher-for state-dir)
-         stop-ch (start-pane-checker! state-dir)
+   (let [{:keys [terminal watcher stop-ch]}
+         (setup-runtime state-dir
+                        (:startup-profile opts))
          exit-on-jump? (:exit-on-jump opts)]
      (try
-       (tui-loop terminal w state-dir exit-on-jump?)
+       (tui-loop terminal watcher state-dir exit-on-jump?)
        (finally
          (async/close! stop-ch)
          (print "\033[2J\033[H")
          (flush)
-         (watcher/close-watcher w)
+         (watcher/close-watcher watcher)
          (input/close-terminal terminal))))))
