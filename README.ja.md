@@ -117,6 +117,15 @@ ceeker
 ceeker --exit-on-jump
 ```
 
+### 起動時の表示モード
+
+`--view` を使うと、起動直後のレイアウトを指定できます。指定可能な値は `auto`、`table`、`card` です。
+
+```bash
+ceeker --view table
+ceeker --view card
+```
+
 ## 便利な tmux 設定
 
 tmux 内のどこからでもポップアップで ceeker を開けます。`--exit-on-jump` と組み合わせると、ペイン選択後にポップアップが自動で閉じます。

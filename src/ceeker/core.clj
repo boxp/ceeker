@@ -15,6 +15,11 @@
 (def cli-options
   [["-h" "--help" "Show help"]
    ["-V" "--version" "Show version"]
+   [nil "--view MODE" "Startup view: auto | table | card"
+    :default :auto
+    :parse-fn keyword
+    :validate [#{:auto :table :card}
+               "Must be one of: auto, table, card"]]
    [nil "--exit-on-jump" "Exit after a successful jump"]
    [nil "--startup-profile"
     "Log startup profiling to stderr"]])
@@ -95,6 +100,13 @@
     (doseq [e errors] (println e)))
   (System/exit 1))
 
+(defn- tui-opts
+  "Builds TUI opts from parsed CLI options."
+  [options]
+  {:exit-on-jump (:exit-on-jump options)
+   :startup-profile (:startup-profile options)
+   :initial-display-mode (:view options)})
+
 ;; musl? is evaluated at AOT compile time (macro expansion time).
 ;; For musl static builds, set CEEKER_STATIC=true CEEKER_MUSL=true
 ;; when running `clojure -T:build uber` to produce a musl-compatible binary.
@@ -134,6 +146,5 @@
        :else
        (do (tui/start-tui!
             nil
-            {:exit-on-jump (:exit-on-jump options)
-             :startup-profile (:startup-profile options)})
+            (tui-opts options))
            (System/exit 0))))))
