@@ -89,6 +89,15 @@
     (is (str/includes? (view/render [] 0 120 :table) "View:Table"))
     (is (str/includes? (view/render [] 0 120 :card) "View:Card"))))
 
+(deftest cli-options-include-startup-profile
+  (testing "--startup-profile is parsed as a boolean option"
+    (let [{:keys [options errors]}
+          (cli/parse-opts ["--startup-profile"]
+                          core/cli-options
+                          :in-order true)]
+      (is (nil? errors))
+      (is (true? (:startup-profile options))))))
+
 (deftest cli-accepts-view-option
   (testing "--view accepts supported startup views"
     (doseq [mode ["auto" "table" "card"]]

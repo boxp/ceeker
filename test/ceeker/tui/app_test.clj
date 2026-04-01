@@ -5,6 +5,7 @@
             [ceeker.tui.input]
             [ceeker.tui.watcher]
             [clojure.core.async :as async]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
 (deftest test-handle-search-key-backspace-delete
@@ -332,6 +333,53 @@
             (Thread/sleep 500)
             (is (= count-at-stop @call-count)
                 "no more checks after stop")))))))
+
+(deftest test-start-tui-logs-startup-profile-when-enabled
+  (testing "start-tui! logs setup timings to stderr"
+    (let [err (java.io.StringWriter.)]
+      (binding [*err* err]
+        (with-redefs [ceeker.tui.app/create-watcher-for
+                      (fn [_] :watcher)
+                      ceeker.tui.app/start-pane-checker!
+                      (fn [_] :stop-ch)
+                      ceeker.tui.app/tui-loop
+                      (fn [& _])
+                      ceeker.tui.input/create-terminal
+                      (fn [] :terminal)
+                      ceeker.tui.input/close-terminal
+                      (fn [_])
+                      ceeker.tui.watcher/close-watcher
+                      (fn [_])
+                      async/close!
+                      (fn [_])]
+          (app/start-tui! nil {:startup-profile true})))
+      (let [output (str err)]
+        (is (str/includes? output "ceeker: startup-profile"))
+        (is (str/includes? output "create-terminal="))
+        (is (str/includes? output "create-watcher="))
+        (is (str/includes? output "start-pane-checker="))
+        (is (str/includes? output "total="))))))
+
+(deftest test-start-tui-skips-startup-profile-when-disabled
+  (testing "start-tui! does not log timings without option"
+    (let [err (java.io.StringWriter.)]
+      (binding [*err* err]
+        (with-redefs [ceeker.tui.app/create-watcher-for
+                      (fn [_] :watcher)
+                      ceeker.tui.app/start-pane-checker!
+                      (fn [_] :stop-ch)
+                      ceeker.tui.app/tui-loop
+                      (fn [& _])
+                      ceeker.tui.input/create-terminal
+                      (fn [] :terminal)
+                      ceeker.tui.input/close-terminal
+                      (fn [_])
+                      ceeker.tui.watcher/close-watcher
+                      (fn [_])
+                      async/close!
+                      (fn [_])]
+          (app/start-tui! nil {})))
+      (is (= "" (str err))))))
 
 ;; --- exit-on-jump tests ---
 
