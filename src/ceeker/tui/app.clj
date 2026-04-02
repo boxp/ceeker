@@ -1,6 +1,6 @@
 (ns ceeker.tui.app
   "TUI application main loop."
-  (:require [ceeker.state.store :as store]
+  (:require [ceeker.session-list :as session-list]
             [ceeker.tmux.pane :as pane]
             [ceeker.tui.filter :as f]
             [ceeker.tui.input :as input]
@@ -46,15 +46,6 @@
              (run-pane-check! state-dir)
              (recur)))))
      stop-ch)))
-
-(defn- get-session-list
-  "Gets session list from state store."
-  ([] (get-session-list nil))
-  ([state-dir]
-   (let [state (if state-dir
-                 (store/read-sessions state-dir)
-                 (store/read-sessions))]
-     (vals (:sessions state)))))
 
 (defn- find-tmux-pane
   "Finds a tmux pane matching the given cwd."
@@ -116,10 +107,7 @@
 (defn- filtered-sorted
   "Applies filters then sorts sessions."
   [sessions filter-state]
-  (sort-by
-   (fn [s]
-     [(if (= :running (:agent-status s)) 0 1)
-      (or (:last-updated s) "")])
+  (session-list/sort-sessions
    (f/apply-filters filter-state sessions)))
 
 (defn- get-terminal-width
@@ -349,7 +337,7 @@
 (defn- render-and-read
   "Renders current state and reads one key event."
   [terminal w state-dir sel msg fs sm? sb display-mode]
-  (let [sessions (get-session-list state-dir)
+  (let [sessions (session-list/read-session-list state-dir)
         visible (filtered-sorted sessions fs)
         mx (max 0 (dec (count visible)))
         cl (clamp sel 0 mx)

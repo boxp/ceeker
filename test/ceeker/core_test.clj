@@ -1,6 +1,8 @@
 (ns ceeker.core-test
   (:require [ceeker.core :as core]
+            [ceeker.tui.app]
             [ceeker.tui.view :as view]
+            [cheshire.core :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.tools.cli :as cli]))
@@ -98,6 +100,15 @@
       (is (nil? errors))
       (is (true? (:startup-profile options))))))
 
+(deftest cli-options-include-list-sessions
+  (testing "--list-sessions is parsed as a boolean option"
+    (let [{:keys [options errors]}
+          (cli/parse-opts ["--list-sessions"]
+                          core/cli-options
+                          :in-order true)]
+      (is (nil? errors))
+      (is (true? (:list-sessions options))))))
+
 (deftest cli-accepts-view-option
   (testing "--view accepts supported startup views"
     (doseq [mode ["auto" "table" "card"]]
@@ -128,3 +139,34 @@
                                     :in-order true)]
       (is (nil? errors))
       (is (= :auto (:view options))))))
+
+(deftest run-parsed-cli-list-sessions-prints-json-and-skips-tui
+  (testing "list mode prints session JSON and does not start TUI"
+    (let [out (java.io.StringWriter.)]
+      (binding [*out* out]
+        (with-redefs [ceeker.core/list-sessions-for-cli
+                      (fn [_]
+                        [{:session_id "sess-1"
+                          :agent_type "codex"
+                          :agent_status "running"
+                          :cwd "/tmp/work"
+                          :pane_id "%42"
+                          :last_message nil
+                          :last_updated "2026-04-02T00:00:00Z"}])
+                      ceeker.tui.app/start-tui!
+                      (fn [& _]
+                        (throw (ex-info "TUI should not start"
+                                        {})))]
+          (is (= 0 (#'core/run-parsed-cli!
+                    {:options {:list-sessions true}
+                     :arguments []
+                     :summary ""
+                     :errors nil})))))
+      (let [payload (json/parse-string (str out) true)
+            first-session (first payload)]
+        (is (= 1 (count payload)))
+        (is (= "sess-1" (:session_id first-session)))
+        (is (= "codex" (:agent_type first-session)))
+        (is (= "running" (:agent_status first-session)))
+        (is (= "%42" (:pane_id first-session)))
+        (is (contains? first-session :last_message))))))
