@@ -465,9 +465,9 @@
           expected (-> (Instant/parse utc-ts)
                        (.atZone (ZoneId/systemDefault))
                        (.format (DateTimeFormatter/ofPattern
-                                 "HH:mm:ss")))]
+                                 "yyyy-MM-dd HH:mm:ss")))]
       (is (= expected result))
-      (is (re-matches #"\d{2}:\d{2}:\d{2}" result)))))
+      (is (re-matches #"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}" result)))))
 
 (deftest test-format-time-nil-and-short
   (testing "nil returns empty string"
@@ -488,8 +488,18 @@
           expected (-> (Instant/parse utc-ts)
                        (.atZone (ZoneId/systemDefault))
                        (.format (DateTimeFormatter/ofPattern
-                                 "HH:mm:ss")))]
+                                 "yyyy-MM-dd HH:mm:ss")))]
       (is (= expected (#'view/format-time utc-ts))))))
+
+(deftest test-format-session-line-includes-full-datetime
+  (testing "table rows show full local datetime, not time only"
+    (let [session (make-session "msg")
+          plain (strip-ansi (#'view/format-session-line session false))
+          expected (-> (Instant/parse (:last-updated session))
+                       (.atZone (ZoneId/systemDefault))
+                       (.format (DateTimeFormatter/ofPattern
+                                 "yyyy-MM-dd HH:mm:ss")))]
+      (is (str/includes? plain expected)))))
 
 ;; -- worktree truncation tests --
 
@@ -576,3 +586,8 @@
               height))
       (is (str/includes? plain "project-3"))
       (is (not (str/includes? plain "project-0"))))))
+
+(deftest test-use-compact-threshold-covers-datetime-column-width
+  (testing "auto mode switches to card view below full table width"
+    (is (false? (#'view/use-compact? :auto 110)))
+    (is (true? (#'view/use-compact? :auto 109)))))
