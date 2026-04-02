@@ -131,13 +131,21 @@
 
 (defn- log-startup-profile!
   "Logs startup profiling summary to stderr."
-  [{:keys [create-terminal create-watcher
+  [{:keys [create-terminal-build
+           create-terminal-enter-raw-mode
+           create-terminal-total
+           create-watcher
            start-pane-checker total]}]
   (binding [*out* *err*]
     (println
      (str "ceeker: startup-profile "
-          "create-terminal="
-          (format "%.2fms" create-terminal)
+          "create-terminal.build="
+          (format "%.2fms" create-terminal-build)
+          " create-terminal.enter-raw-mode="
+          (format "%.2fms"
+                  create-terminal-enter-raw-mode)
+          " create-terminal.total="
+          (format "%.2fms" create-terminal-total)
           " create-watcher="
           (format "%.2fms" create-watcher)
           " start-pane-checker="
@@ -151,18 +159,21 @@
   "Creates startup resources and optionally logs timings."
   [state-dir startup-profile?]
   (let [started-at (System/nanoTime)
-        terminal-step (timed-step input/create-terminal)
+        terminal-step (input/create-terminal-profile)
         watcher-step (timed-step
                       #(create-watcher-for state-dir))
         checker-step (timed-step
                       #(start-pane-checker! state-dir))]
     (when startup-profile?
       (log-startup-profile!
-       {:create-terminal (:elapsed-ms terminal-step)
+       {:create-terminal-build (:build-ms terminal-step)
+        :create-terminal-enter-raw-mode
+        (:enter-raw-mode-ms terminal-step)
+        :create-terminal-total (:total-ms terminal-step)
         :create-watcher (:elapsed-ms watcher-step)
         :start-pane-checker (:elapsed-ms checker-step)
         :total (elapsed-ms started-at)}))
-    {:terminal (:result terminal-step)
+    {:terminal (:terminal terminal-step)
      :watcher (:result watcher-step)
      :stop-ch (:result checker-step)}))
 

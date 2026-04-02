@@ -18,8 +18,8 @@
 
 (def ^:const compact-threshold
   "Terminal width (columns) below which compact card view is used.
-   Derived from table row width: prefix(4) + columns + gaps = ~98."
-  100)
+   Derived from table row width: prefix(4) + columns + gaps = 109."
+  110)
 
 (def ^:const max-card-message-lines
   "Maximum number of message lines shown in a card."
@@ -138,12 +138,12 @@
                      (conj current-line c) lines))))))))
 
 (def ^:private time-formatter
-  "HH:mm:ss formatter for local time display.
+  "yyyy-MM-dd HH:mm:ss formatter for local datetime display.
    Immutable and safe to initialize at build time."
-  (DateTimeFormatter/ofPattern "HH:mm:ss"))
+  (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm:ss"))
 
 (defn- format-time
-  "Formats an ISO-8601 UTC timestamp to HH:mm:ss in local timezone.
+  "Formats an ISO-8601 UTC timestamp to yyyy-MM-dd HH:mm:ss in local timezone.
    Resolves the system timezone at runtime to avoid baking the build
    machine's timezone into GraalVM native images."
   [updated]
