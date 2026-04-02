@@ -109,6 +109,32 @@ ceeker
 | `c` | フィルタ全クリア |
 | `q` | 終了 |
 
+### Session List JSON
+
+`--list-sessions` を付けると、ceeker は TUI を起動せず現在の session list を JSON で標準出力します。LLM や外部ツール連携向けのモードで、各 session には tmux pane を特定できる `pane_id` も含まれます。
+
+```bash
+ceeker --list-sessions
+```
+
+出力例:
+
+```json
+[
+  {
+    "session_id": "sess-123",
+    "agent_type": "codex",
+    "agent_status": "running",
+    "cwd": "/path/to/worktree",
+    "pane_id": "%42",
+    "last_message": "planning changes",
+    "last_updated": "2026-04-02T12:34:56Z"
+  }
+]
+```
+
+出力前に ceeker は 1 回だけ同期的に pane 生存確認と capture ベースの状態更新を行います。tmux 更新に失敗した場合でも、保存済みの session list はそのまま返します。
+
 ### ジャンプ後に自動終了
 
 `--exit-on-jump` を指定すると、ジャンプ成功後に ceeker が自動的に終了します。ポップアップで一時的に起動し、セッション選択→ジャンプ→自動クローズする運用に便利です。

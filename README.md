@@ -109,6 +109,32 @@ Displays a list of all active sessions.
 | `c` | Clear all filters |
 | `q` | Quit |
 
+### Session List JSON
+
+With `--list-sessions`, ceeker skips the TUI and prints the current session list as JSON. This is intended for LLM or tool integration. Each session includes `pane_id` so callers can identify the tmux pane directly.
+
+```bash
+ceeker --list-sessions
+```
+
+Example output:
+
+```json
+[
+  {
+    "session_id": "sess-123",
+    "agent_type": "codex",
+    "agent_status": "running",
+    "cwd": "/path/to/worktree",
+    "pane_id": "%42",
+    "last_message": "planning changes",
+    "last_updated": "2026-04-02T12:34:56Z"
+  }
+]
+```
+
+Before printing, ceeker performs one synchronous pane liveness and capture-based state refresh. If tmux refresh fails, ceeker still returns the stored session list.
+
 ### Exit on Jump
 
 With `--exit-on-jump`, ceeker exits automatically after a successful jump. This is useful when running ceeker as a one-shot popup — select a session, jump, and the popup closes by itself.
