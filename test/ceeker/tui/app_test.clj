@@ -344,8 +344,12 @@
                       (fn [_] :stop-ch)
                       ceeker.tui.app/tui-loop
                       (fn [& _])
-                      ceeker.tui.input/create-terminal
-                      (fn [] :terminal)
+                      ceeker.tui.input/create-terminal-profile
+                      (fn []
+                        {:terminal :terminal
+                         :build-ms 12.0
+                         :enter-raw-mode-ms 34.0
+                         :total-ms 46.0})
                       ceeker.tui.input/close-terminal
                       (fn [_])
                       ceeker.tui.watcher/close-watcher
@@ -355,7 +359,10 @@
           (app/start-tui! nil {:startup-profile true})))
       (let [output (str err)]
         (is (str/includes? output "ceeker: startup-profile"))
-        (is (str/includes? output "create-terminal="))
+        (is (str/includes? output "create-terminal.build="))
+        (is (str/includes? output
+                           "create-terminal.enter-raw-mode="))
+        (is (str/includes? output "create-terminal.total="))
         (is (str/includes? output "create-watcher="))
         (is (str/includes? output "start-pane-checker="))
         (is (str/includes? output "total="))))))
@@ -370,8 +377,12 @@
                       (fn [_] :stop-ch)
                       ceeker.tui.app/tui-loop
                       (fn [& _])
-                      ceeker.tui.input/create-terminal
-                      (fn [] :terminal)
+                      ceeker.tui.input/create-terminal-profile
+                      (fn []
+                        {:terminal :terminal
+                         :build-ms 12.0
+                         :enter-raw-mode-ms 34.0
+                         :total-ms 46.0})
                       ceeker.tui.input/close-terminal
                       (fn [_])
                       ceeker.tui.watcher/close-watcher
@@ -466,8 +477,12 @@
                     (fn [_] nil)
                     ceeker.tui.app/start-pane-checker!
                     (fn [_] stop-ch)
-                    ceeker.tui.input/create-terminal
-                    (fn [] ::terminal)
+                    ceeker.tui.input/create-terminal-profile
+                    (fn []
+                      {:terminal ::terminal
+                       :build-ms 1.0
+                       :enter-raw-mode-ms 2.0
+                       :total-ms 3.0})
                     ceeker.tui.input/close-terminal
                     (fn [_])
                     ceeker.tui.watcher/close-watcher

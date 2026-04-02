@@ -3,15 +3,43 @@
   (:import [org.jline.terminal TerminalBuilder]
            [org.jline.utils NonBlockingReader]))
 
+(defn- elapsed-ms
+  "Returns elapsed milliseconds since started-at."
+  [started-at]
+  (/ (- (System/nanoTime) started-at) 1000000.0))
+
+(defn build-terminal
+  "Builds the system terminal."
+  []
+  (-> (TerminalBuilder/builder)
+      (.system true)
+      (.jansi false)
+      (.build)))
+
+(defn enter-raw-mode!
+  "Puts terminal into raw mode."
+  [^org.jline.terminal.Terminal terminal]
+  (.enterRawMode terminal)
+  terminal)
+
+(defn create-terminal-profile
+  "Creates a terminal and returns step timings."
+  []
+  (let [started-at (System/nanoTime)
+        build-started-at (System/nanoTime)
+        terminal (build-terminal)
+        build-ms (elapsed-ms build-started-at)
+        raw-started-at (System/nanoTime)]
+    (enter-raw-mode! terminal)
+    {:terminal terminal
+     :build-ms build-ms
+     :enter-raw-mode-ms (elapsed-ms raw-started-at)
+     :total-ms (elapsed-ms started-at)}))
+
 (defn create-terminal
   "Creates a JLine3 terminal and enters raw mode."
   []
-  (let [terminal (-> (TerminalBuilder/builder)
-                     (.system true)
-                     (.jansi false)
-                     (.build))]
-    (.enterRawMode terminal)
-    terminal))
+  (:terminal (create-terminal-profile)))
 
 (defn- read-escape-seq
   "Reads an escape sequence from reader. Returns keyword or nil."
