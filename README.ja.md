@@ -418,6 +418,15 @@ make lint
 make format
 ```
 
+ceeker repo には、Claude Code と Codex 向けの repo-local hook 設定を同梱しています。
+
+- `.claude/settings.json`: `Write|Edit|MultiEdit|Bash` の `PostToolUse` 後に `scripts/agent-hooks/lint_format_check_hook.py` を非同期実行
+- `.codex/hooks.json`: `PostToolUse` 後に同じスクリプトを実行
+
+この hook は `make format-check` と `make lint` を順に実行し、結果を agent に返します。Claude Code は repo を開くだけで有効です。Codex は feature flag が必要なので、未設定なら `~/.codex/config.toml` に `[features] codex_hooks = true` を追加するか `codex features enable codex_hooks` を実行してください。
+
+補足: Codex の `PostToolUse` は 2026-04-14 時点の公式仕様では `Bash` のみが発火対象です。そのため ceeker の Codex hook も、ファイル変更の可能性がある Bash 実行に対してのみ `format-check` / `lint` を走らせます。
+
 ## CI
 
 GitHub Actions で以下のジョブが PR / main push 時に実行されます:
