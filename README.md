@@ -420,10 +420,10 @@ make format
 
 The ceeker repo ships repo-local hooks for both Claude Code and Codex.
 
-- `.claude/settings.json`: runs `scripts/agent-hooks/lint_format_check_hook.py` asynchronously after `PostToolUse` for `Write|Edit|MultiEdit|Bash`
+- `.claude/settings.json`: runs `scripts/agent-hooks/lint_format_check_hook.clj` asynchronously after `PostToolUse` for `Write|Edit|MultiEdit|Bash`
 - `.codex/hooks.json`: runs the same script after `PostToolUse`
 
-The hook runs `make format-check` and `make lint` in sequence and reports the result back to the agent. Claude Code picks this up automatically when you open the repo. For Codex, ensure the feature flag is enabled by adding `[features] codex_hooks = true` to `~/.codex/config.toml` or by running `codex features enable codex_hooks`.
+The hook is implemented as a babashka (`bb`) script. It runs `make format-check` and `make lint` in sequence and reports the result back to the agent. Claude Code picks this up automatically when you open the repo. For Codex, ensure the feature flag is enabled by adding `[features] codex_hooks = true` to `~/.codex/config.toml` or by running `codex features enable codex_hooks`.
 
 Note: per the official Codex hooks documentation as of April 14, 2026, `PostToolUse` currently fires only for `Bash`. ceeker therefore limits the Codex hook to Bash commands that are likely to have modified the workspace before running `format-check` and `lint`.
 

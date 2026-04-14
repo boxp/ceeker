@@ -2,7 +2,7 @@
 set -eu
 
 REPO_ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-HOOK_SCRIPT="${REPO_ROOT}/scripts/agent-hooks/lint_format_check_hook.py"
+HOOK_SCRIPT="${REPO_ROOT}/scripts/agent-hooks/lint_format_check_hook.clj"
 TEST_TMP_ROOT=$(mktemp -d)
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -97,7 +97,7 @@ run_hook() {
   HOOK_TEST_MAKE_LOG="${LOG_FILE}" \
   HOOK_TEST_MAKE_BEHAVIOR="${MAKE_BEHAVIOR}" \
   PATH="${STUB_DIR}:${PATH}" \
-  python3 "${HOOK_SCRIPT}" <"${INPUT_FILE}" >"${OUTPUT_FILE}"
+  bb "${HOOK_SCRIPT}" <"${INPUT_FILE}" >"${OUTPUT_FILE}"
 }
 
 test_write_runs_format_and_lint() {

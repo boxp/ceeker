@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 \"$CLAUDE_PROJECT_DIR\"/scripts/agent-hooks/lint_format_check_hook.py",
+            "command": "/usr/bin/env bb \"$CLAUDE_PROJECT_DIR\"/scripts/agent-hooks/lint_format_check_hook.clj",
             "async": true,
             "timeout": 300
           }
