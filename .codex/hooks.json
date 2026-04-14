@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env bb \"$(git rev-parse --show-toplevel)/scripts/agent-hooks/lint_format_check_hook.clj\"",
+            "statusMessage": "Running ceeker format-check and lint",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

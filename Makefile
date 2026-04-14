@@ -1,12 +1,15 @@
-.PHONY: test test-install-script lint format-check format ci run clean uber
+.PHONY: test test-install-script test-agent-hooks lint format-check format ci run clean uber
 
-test: test-install-script
+test: test-install-script test-agent-hooks
 	mkdir -p target/test-runtime
 	mkdir -p target/test-runtime/tmux
 	TMUX= TMUX_PANE= TMUX_TMPDIR=$(CURDIR)/target/test-runtime/tmux XDG_RUNTIME_DIR=$(CURDIR)/target/test-runtime clojure -M:test
 
 test-install-script:
 	sh test/install_script_test.sh
+
+test-agent-hooks:
+	sh test/agent_hook_test.sh
 
 lint:
 	clojure -M:lint
