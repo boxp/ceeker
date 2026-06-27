@@ -85,6 +85,7 @@
   (case agent-type
     :claude-code #"(?i)claude"
     :codex #"(?i)codex"
+    :pi #"(?i)\\bpi\\b"
     #"(?i)claude|codex"))
 
 (defn process-alive?

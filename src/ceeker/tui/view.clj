@@ -15,6 +15,7 @@
 (def ^:private ansi-cyan "\033[36m")
 (def ^:private ansi-blue "\033[34m")
 (def ^:private ansi-magenta "\033[35m")
+(def ^:private ansi-white "\033[37m")
 
 (def ^:const compact-threshold
   "Terminal width (columns) below which compact card view is used."
@@ -45,6 +46,7 @@
   (case agent-type
     :claude-code (str ansi-cyan "[Claude]" ansi-reset)
     :codex (str ansi-blue "[Codex]" ansi-reset)
+    :pi (str ansi-white "[Pi]" ansi-reset)
     (str ansi-dim "[???]" ansi-reset)))
 
 (defn- char-display-width

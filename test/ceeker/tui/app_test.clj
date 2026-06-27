@@ -225,12 +225,16 @@
           r2 (#'ceeker.tui.app/filter-key-result
               \a (:fs r1))
           r3 (#'ceeker.tui.app/filter-key-result
-              \a (:fs r2))]
+              \a (:fs r2))
+          r4 (#'ceeker.tui.app/filter-key-result
+              \a (:fs r3))]
       (is (= :claude-code
              (get-in r1 [:fs :agent-filter])))
       (is (= :codex
              (get-in r2 [:fs :agent-filter])))
-      (is (nil? (get-in r3 [:fs :agent-filter]))))))
+      (is (= :pi
+             (get-in r3 [:fs :agent-filter])))
+      (is (nil? (get-in r4 [:fs :agent-filter]))))))
 
 (deftest test-filter-key-s-full-cycle-no-crash
   (testing "'s' key cycles through all status filters"

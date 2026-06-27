@@ -313,6 +313,16 @@
       (finally
         (cleanup-dir dir)))))
 
+;; --- Pi agent tests ---
+
+(deftest test-normalize-pi-event
+  (testing "pi agent with empty payload creates :pi session"
+    (let [result (handler/normalize-event
+                  "pi" "SessionStart" {})]
+      (is (= :pi (:agent-type result)))
+      (is (some? (:session-id result)))
+      (is (some? (:last-updated result))))))
+
 ;; --- Codex tests ---
 
 (deftest test-normalize-codex-notification

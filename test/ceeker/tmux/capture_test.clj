@@ -114,12 +114,51 @@
   (testing "Empty lines -> nil"
     (is (nil? (capture/detect-codex-state ["" ""])))))
 
+;; --- Pi agent state detection ---
+
+(deftest test-pi-running-working
+  (testing "'Working...' indicator -> running"
+    (let [lines ["\u273B Working\u2026"]
+          result (capture/detect-pi-state lines)]
+      (is (= :running (:status result)))
+      (is (nil? (:waiting-reason result))))))
+
+(deftest test-pi-running-spinner
+  (testing "Pi spinner with interrupt hint -> running"
+    (let [lines ["\u2722 Thinking\u2026 (esc to interrupt)"]
+          result (capture/detect-pi-state lines)]
+      (is (= :running (:status result))))))
+
+(deftest test-pi-idle-prompt
+  (testing "Prompt line -> idle"
+    (let [lines ["previous output"
+                 "$ "]
+          result (capture/detect-pi-state lines)]
+      (is (= :idle (:status result))))))
+
+(deftest test-pi-question-dialog-waiting
+  (testing "Question dialog -> waiting"
+    (let [lines ["Choose an option:"
+                 "Enter to select"]
+          result (capture/detect-pi-state lines)]
+      (is (= :waiting (:status result))))))
+
+(deftest test-pi-empty-inconclusive
+  (testing "Empty lines -> nil"
+    (is (nil? (capture/detect-pi-state ["" ""])))))
+
 ;; --- detect-agent-state dispatch ---
 
 (deftest test-detect-agent-state-nil-pane
   (testing "nil pane-id returns nil"
     (is (nil? (capture/detect-agent-state nil :claude-code)))
     (is (nil? (capture/detect-agent-state "" :claude-code)))))
+
+(deftest test-detect-agent-state-pi-dispatch
+  (testing ":pi dispatches to detect-pi-state"
+    (let [lines ["\u2722 Working\u2026"]
+          result (capture/detect-pi-state lines)]
+      (is (= :running (:status result))))))
 
 ;; --- capture-pane-content ---
 

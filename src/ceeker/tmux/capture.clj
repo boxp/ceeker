@@ -129,6 +129,60 @@
   (when (some codex-prompt-line? (take-last 5 non-blank))
     {:status :idle :waiting-reason nil}))
 
+(def ^:private pi-spinner-chars
+  "Spinner characters used by Pi agent TUI."
+  #{\u2722 \u273D \u2736 \u2733 \u273B \u00B7})
+
+(defn- pi-running-line?
+  "Returns true if the line indicates Pi is running.
+   Checks for spinner chars or 'Working...' indicator."
+  [line]
+  (when (seq line)
+    (let [trimmed (str/trim line)]
+      (or (and (contains? pi-spinner-chars (first trimmed))
+               (or (str/includes? trimmed "esc to interrupt")
+                   (str/includes? trimmed "\u2026")))
+          (str/includes? trimmed "Working...")))))
+
+(defn- pi-prompt-line?
+  "Returns true if line contains Pi prompt char."
+  [line]
+  (let [trimmed (str/trim line)]
+    (and (not (str/blank? trimmed))
+         (not (re-find #"^\s*$" trimmed))
+         (not (str/includes? trimmed "Working..."))
+         (not (re-find #"^\u2502" trimmed)))))
+
+(defn- detect-pi-running
+  "Returns running result if Pi activity found."
+  [tail]
+  (when (some pi-running-line? tail)
+    {:status :running :waiting-reason nil}))
+
+(defn- detect-pi-waiting
+  "Returns waiting result if dialog/approval found."
+  [tail]
+  (when (or (some question-dialog? tail)
+            (plan-approval-line? tail))
+    {:status :waiting :waiting-reason "respond"}))
+
+(defn- detect-pi-idle
+  "Returns idle result if Pi prompt is visible."
+  [non-blank]
+  (when (some pi-prompt-line? (take-last 5 non-blank))
+    {:status :idle :waiting-reason nil}))
+
+(defn detect-pi-state
+  "Detects Pi agent state from captured pane lines.
+   Returns map with :status and :waiting-reason,
+   or nil when inconclusive."
+  [lines]
+  (let [non-blank (remove str/blank? lines)
+        tail (take-last 30 non-blank)]
+    (or (detect-pi-running tail)
+        (detect-pi-waiting tail)
+        (detect-pi-idle non-blank))))
+
 (defn detect-codex-state
   "Detects Codex agent state from captured pane lines.
    Returns map with :status and :waiting-reason,
@@ -164,4 +218,5 @@
     (case agent-type
       :claude-code (detect-claude-state lines)
       :codex (detect-codex-state lines)
+      :pi (detect-pi-state lines)
       nil)))

@@ -105,11 +105,13 @@
     (let [f0 f/empty-filter
           f1 (f/toggle-agent-filter f0)
           f2 (f/toggle-agent-filter f1)
-          f3 (f/toggle-agent-filter f2)]
+          f3 (f/toggle-agent-filter f2)
+          f4 (f/toggle-agent-filter f3)]
       (is (nil? (:agent-filter f0)))
       (is (= :claude-code (:agent-filter f1)))
       (is (= :codex (:agent-filter f2)))
-      (is (nil? (:agent-filter f3)))))
+      (is (= :pi (:agent-filter f3)))
+      (is (nil? (:agent-filter f4)))))
 
   (testing "unknown agent filter falls back to first cycle item"
     (let [f0 (assoc f/empty-filter :agent-filter :unknown)
@@ -189,12 +191,14 @@
           f1 (f/toggle-agent-filter f0)
           f2 (f/toggle-agent-filter f1)
           f3 (f/toggle-agent-filter f2)
-          f4 (f/toggle-agent-filter f3)]
+          f4 (f/toggle-agent-filter f3)
+          f5 (f/toggle-agent-filter f4)]
       (is (nil? (:agent-filter f0)))
       (is (= :claude-code (:agent-filter f1)))
       (is (= :codex (:agent-filter f2)))
-      (is (nil? (:agent-filter f3)))
-      (is (= :claude-code (:agent-filter f4))))))
+      (is (= :pi (:agent-filter f3)))
+      (is (nil? (:agent-filter f4)))
+      (is (= :claude-code (:agent-filter f5))))))
 
 (deftest test-toggle-status-filter-full-cycle
   (testing "full status cycle does not throw on PersistentVector"

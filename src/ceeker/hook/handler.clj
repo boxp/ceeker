@@ -112,6 +112,30 @@
     "stop" [:completed "session ended"]
     [:running (str "event: " event-type)]))
 
+(defn- extract-pi-identity
+  "Extracts session-id and cwd from Pi payload."
+  [payload]
+  {:session-id (or (:session_id payload)
+                   (str (java.util.UUID/randomUUID)))
+   :cwd (or (:cwd payload) "")})
+
+(defn- pi-event-fields
+  "Returns [status message] for a Pi event type."
+  [event-type]
+  (case event-type
+    "SessionStart" [:running nil]
+    "Stop" [:completed "session ended"]
+    [:running nil]))
+
+(defn- normalize-pi-event
+  "Normalizes a Pi hook event into session state.
+   Pi does not send hook events; this is a fallback
+   for completeness."
+  [event-type payload]
+  (let [{:keys [session-id cwd]} (extract-pi-identity payload)
+        [status message] (pi-event-fields event-type)]
+    (make-session session-id :pi status cwd message)))
+
 (defn- normalize-codex-event
   "Normalizes a Codex hook event into session state."
   [event-type payload]
@@ -127,6 +151,7 @@
   (case agent-type
     "claude" (normalize-claude-event event-type payload)
     "codex" (normalize-codex-event event-type payload)
+    "pi" (normalize-pi-event event-type payload)
     (throw (ex-info (str "Unknown agent type: " agent-type)
                     {:agent-type agent-type}))))
 
@@ -166,6 +191,7 @@
          (case agent-type
            "codex" (resolve-codex-event
                     event-type payload)
+           "pi" (or event-type "SessionStart")
            (resolve-claude-event
             event-type payload))
          session-data (normalize-event
