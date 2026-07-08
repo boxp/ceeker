@@ -231,6 +231,15 @@
   [pane-id pane-infos]
   (some #(= pane-id (:pane-id %)) pane-infos))
 
+(defn- metadata-only-ghost?
+  [cwd pane-id]
+  (and (str/blank? cwd)
+       (str/blank? pane-id)))
+
+(defn- dead-agent-session?
+  [session pane-infos]
+  (= :dead (session-has-live-agent? session pane-infos)))
+
 (defn- stale-session?
   "Returns true if the session is stale given pane state.
    Conservative: returns false when liveness is unknown.
@@ -245,18 +254,16 @@
         cwd-present? (contains? pane-cwds cwd)
         pane-exists? (and (seq pane-id)
                           (pane-id-exists? pane-id pane-infos))]
-    (and (seq cwd)
-         (cond
-           pane-exists?
-           (= :dead (session-has-live-agent?
-                     session pane-infos))
-           (not cwd-present?) true
-           (seq pane-id)
-           (= :dead (session-has-live-agent?
-                     session pane-infos))
-           :else
-           (= :dead (session-has-live-agent?
-                     session pane-infos))))))
+    (cond
+      (str/blank? cwd)
+      (metadata-only-ghost? cwd pane-id)
+
+      (and (not pane-exists?)
+           (not cwd-present?))
+      true
+
+      :else
+      (dead-agent-session? session pane-infos))))
 
 (defn- run-stale-cleanup!
   "Runs stale-close and purge for the given dir."

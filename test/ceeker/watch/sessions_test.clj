@@ -458,6 +458,88 @@
         (cleanup-dir (.getParent file))
         (cleanup-dir state-dir)))))
 
+(deftest test-watch-skips-session-until-cwd-is-known
+  (let [state-dir (temp-dir)
+        file-states (atom {})
+        file (io/file (temp-dir) "claude-metadata.jsonl")]
+    (try
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)]
+        (#'sessions/process-lines!
+         state-dir file-states file
+         [(str "{\"type\":\"ai-title\",\"aiTitle\":\"title\","
+               "\"sessionId\":\"claude-metadata\"}")])
+        (is (nil? (get-in (store/read-sessions state-dir)
+                          [:sessions "claude-metadata"])))
+        (#'sessions/process-lines!
+         state-dir file-states file
+         [(str "{\"sessionId\":\"claude-metadata\","
+               "\"cwd\":\"/tmp/w\","
+               "\"timestamp\":\"" (iso-before 1000) "\","
+               "\"type\":\"user\"}")])
+        (is (= "/tmp/w"
+               (get-in (store/read-sessions state-dir)
+                       [:sessions "claude-metadata" :cwd]))))
+      (finally
+        (cleanup-dir (.getParent file))
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-skips-session-without-cwd
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        claude-dir (io/file root "claude/-home-boxp")]
+    (try
+      (.mkdirs claude-dir)
+      (spit (io/file claude-dir "metadata-only.jsonl")
+            (str "{\"type\":\"ai-title\",\"aiTitle\":\"title\","
+                 "\"sessionId\":\"claude-metadata\"}\n"
+                 "{\"type\":\"agent-name\","
+                 "\"sessionId\":\"claude-metadata\"}\n"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info (fn [] nil)]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :pi-root (.getPath (io/file root "pi"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (is (nil? (get-in (store/read-sessions state-dir)
+                        [:sessions "claude-metadata"])))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-write-requires-cwd-for-all-agent-parsers
+  (let [state-dir (temp-dir)
+        file-states (atom {})
+        root (temp-dir)]
+    (try
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)]
+        (doseq [[agent-type filename line]
+                [[:claude-code
+                  "claude.jsonl"
+                  "{\"type\":\"ai-title\",\"sessionId\":\"claude-no-cwd\"}"]
+                 [:codex
+                  "rollout-2026-01-01T00-00-00Z-no-cwd.jsonl"
+                  (str "{\"timestamp\":\"2026-01-01T00:00:00Z\","
+                       "\"type\":\"session_meta\","
+                       "\"payload\":{\"session_id\":\"codex-no-cwd\"}}")]
+                 [:pi
+                  "pi.jsonl"
+                  (str "{\"type\":\"session\",\"version\":3,"
+                       "\"id\":\"pi-no-cwd\","
+                       "\"timestamp\":\"2026-01-01T00:00:00Z\"}")]]]
+          (#'sessions/process-lines!
+           state-dir file-states (io/file root filename)
+           [line]
+           {:agent-type agent-type})))
+      (let [sessions-map (:sessions (store/read-sessions state-dir))]
+        (is (nil? (get sessions-map "claude-no-cwd")))
+        (is (nil? (get sessions-map "codex-no-cwd")))
+        (is (nil? (get sessions-map "pi-no-cwd"))))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
 (deftest test-scan-keeps-claude-assistant-last-message
   (let [root (temp-dir)
         state-dir (temp-dir)
