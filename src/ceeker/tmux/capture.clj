@@ -140,6 +140,51 @@
         (detect-codex-waiting tail)
         (detect-codex-idle non-blank))))
 
+;; --- Pi detection patterns ---
+
+(defn- pi-running-line?
+  "Returns true if line indicates pi is streaming or can be aborted."
+  [line]
+  (let [lower (str/lower-case (or line ""))]
+    (or (re-find #"(?i)(^|\s)[\u25CF\u2022]\s*working(\s|$)" line)
+        (and (str/includes? lower "working")
+             (or (str/includes? lower "abort")
+                 (str/includes? lower "queued")
+                 (str/includes? lower "queues")))
+        (and (str/includes? lower "escape")
+             (str/includes? lower "abort")
+             (str/includes? lower "queued")))))
+
+(defn- detect-pi-running
+  "Returns running result if pi working/queue/abort cues are found."
+  [tail]
+  (when (some pi-running-line? tail)
+    {:status :running :waiting-reason nil}))
+
+(defn- detect-pi-waiting
+  "Returns waiting result if a generic dialog/approval is visible."
+  [tail]
+  (when (or (some question-dialog? tail)
+            (plan-approval-line? tail))
+    {:status :waiting :waiting-reason "respond"}))
+
+(defn- detect-pi-idle
+  "Returns idle result if a shell prompt is visible."
+  [non-blank]
+  (when (some prompt-line? (take-last 5 non-blank))
+    {:status :idle :waiting-reason nil}))
+
+(defn detect-pi-state
+  "Detects pi agent state from captured pane lines.
+   Returns map with :status and :waiting-reason,
+   or nil when inconclusive."
+  [lines]
+  (let [non-blank (remove str/blank? lines)
+        tail (take-last 30 non-blank)]
+    (or (detect-pi-running tail)
+        (detect-pi-waiting tail)
+        (detect-pi-idle non-blank))))
+
 ;; --- tmux capture-pane interface ---
 
 (defn capture-pane-content
@@ -164,4 +209,5 @@
     (case agent-type
       :claude-code (detect-claude-state lines)
       :codex (detect-codex-state lines)
+      :pi (detect-pi-state lines)
       nil)))

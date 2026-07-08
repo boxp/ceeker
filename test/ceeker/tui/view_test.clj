@@ -360,6 +360,15 @@
           plain (strip-ansi line)]
       (is (not (str/includes? plain "\n"))))))
 
+(deftest test-format-session-line-pi-agent
+  (testing "pi sessions render with a Pi badge"
+    (let [session (assoc (make-session "pi is working")
+                         :agent-type :pi)
+          line (#'view/format-session-line session false)
+          plain (strip-ansi line)]
+      (is (str/includes? plain "[Pi]"))
+      (is (str/includes? plain "pi is working")))))
+
 ;; -- strip-ansi tests --
 
 (deftest test-strip-ansi
@@ -411,26 +420,36 @@
         (is (not (str/includes? (strip-ansi line) "\n")))))))
 
 (deftest test-table-columns-aligned-different-agent-types
-  (testing "claude-code and codex badges produce same column offset"
+  (testing "claude-code, codex, and pi badges produce same column offset"
     (let [s-claude (assoc (make-session "hello")
                           :agent-type :claude-code
                           :agent-status :running)
           s-codex (assoc (make-session "hello")
                          :agent-type :codex
                          :agent-status :running)
+          s-pi (assoc (make-session "hello")
+                      :agent-type :pi
+                      :agent-status :running)
           line-claude (strip-ansi
                        (#'view/format-session-line
                         s-claude false))
           line-codex (strip-ansi
                       (#'view/format-session-line
                        s-codex false))
+          line-pi (strip-ansi
+                   (#'view/format-session-line
+                    s-pi false))
           claude-running-pos (str/index-of
                               line-claude "Running")
           codex-running-pos (str/index-of
-                             line-codex "Running")]
+                             line-codex "Running")
+          pi-running-pos (str/index-of
+                          line-pi "Running")]
       (is (some? claude-running-pos))
       (is (some? codex-running-pos))
-      (is (= claude-running-pos codex-running-pos)))))
+      (is (some? pi-running-pos))
+      (is (= claude-running-pos codex-running-pos
+             pi-running-pos)))))
 
 (deftest test-table-columns-aligned-different-statuses
   (testing "different status badges produce same WORKTREE column offset"

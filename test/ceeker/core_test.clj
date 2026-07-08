@@ -147,7 +147,7 @@
         (with-redefs [ceeker.core/list-sessions-for-cli
                       (fn [_]
                         [{:session_id "sess-1"
-                          :agent_type "codex"
+                          :agent_type "pi"
                           :agent_status "running"
                           :cwd "/tmp/work"
                           :pane_id "%42"
@@ -166,7 +166,7 @@
             first-session (first payload)]
         (is (= 1 (count payload)))
         (is (= "sess-1" (:session_id first-session)))
-        (is (= "codex" (:agent_type first-session)))
+        (is (= "pi" (:agent_type first-session)))
         (is (= "running" (:agent_status first-session)))
         (is (= "%42" (:pane_id first-session)))
         (is (contains? first-session :last_message))))))

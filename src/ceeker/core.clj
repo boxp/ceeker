@@ -43,7 +43,7 @@
     "                      Handle a hook event"
     "  ceeker hook <agent> <json-payload>"
     "                      Handle a Codex notify event"
-    "                      agent: claude | codex"
+    "                      agent: claude | codex | pi"
     ""
     "Options:"
     summary]))
@@ -87,7 +87,7 @@
       (do
         (binding [*out* *err*]
           (println "Usage: ceeker hook <agent> <event>")
-          (println "  agent: claude | codex"))
+          (println "  agent: claude | codex | pi"))
         1)
       (let [{:keys [event-type payload]}
             (resolve-hook-args args raw-second)
