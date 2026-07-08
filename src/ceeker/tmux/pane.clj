@@ -201,7 +201,7 @@
             children agent-type
             (dec max-depth))))))))
 
-(defn- session-has-live-agent?
+(defn session-has-live-agent?
   "Checks if a session's agent is alive by searching the
    process tree of matching tmux panes.
    Prefers pane-id match over cwd-only match.
@@ -235,8 +235,9 @@
    Conservative: returns false when liveness is unknown.
    When a session has a pane-id and that pane still exists,
    uses process-tree check even if cwd changed.
-   Skips process-tree check when session has no pane-id
-   (started outside tmux)."
+   When a session has no pane-id but shares cwd with a pane,
+   checks that pane's process tree and keeps unknown liveness
+   non-stale."
   [session pane-cwds pane-infos]
   (let [cwd (:cwd session)
         pane-id (:pane-id session)
@@ -252,7 +253,9 @@
            (seq pane-id)
            (= :dead (session-has-live-agent?
                      session pane-infos))
-           :else false))))
+           :else
+           (= :dead (session-has-live-agent?
+                     session pane-infos))))))
 
 (defn- run-stale-cleanup!
   "Runs stale-close and purge for the given dir."

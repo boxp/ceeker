@@ -367,6 +367,36 @@
         (finally
           (cleanup-dir dir))))))
 
+(deftest test-stale-pane-id-less-cwd-match-dead-agent
+  (testing "Pane-id-less session is stale when cwd pane has no live agent"
+    (let [stale? #'ceeker.tmux.pane/stale-session?
+          session {:agent-type :claude-code
+                   :agent-status :running
+                   :cwd "/tmp/work"
+                   :pane-id ""}
+          pane-infos [{:pane-id "%5"
+                       :pid "12345"
+                       :cwd "/tmp/work"}]
+          pane-cwds #{"/tmp/work"}]
+      (with-redefs [pane/find-agent-in-tree
+                    (fn [_ _] :not-found)]
+        (is (true? (stale? session pane-cwds pane-infos)))))))
+
+(deftest test-stale-pane-id-less-cwd-match-unknown-agent
+  (testing "Pane-id-less session remains non-stale when liveness is unknown"
+    (let [stale? #'ceeker.tmux.pane/stale-session?
+          session {:agent-type :claude-code
+                   :agent-status :running
+                   :cwd "/tmp/work"
+                   :pane-id ""}
+          pane-infos [{:pane-id "%5"
+                       :pid "12345"
+                       :cwd "/tmp/work"}]
+          pane-cwds #{"/tmp/work"}]
+      (with-redefs [pane/find-agent-in-tree
+                    (fn [_ _] :unknown)]
+        (is (false? (stale? session pane-cwds pane-infos)))))))
+
 ;; --- Closed session with dead agent not reactivated ---
 
 (deftest test-closed-session-dead-agent-not-reactivated
