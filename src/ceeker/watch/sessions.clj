@@ -45,16 +45,18 @@
 (defn- parse-claude [m]
   (let [session-id (:sessionId m)
         cwd (:cwd m)
-        timestamp (:timestamp m)]
+        timestamp (:timestamp m)
+        content (assistant-content (:message m))]
     (when (or session-id cwd timestamp)
       (cond-> {:agent-type :claude-code
                :agent-status :running}
         session-id (assoc :session-id session-id)
         cwd (assoc :cwd cwd)
         timestamp (assoc :last-updated timestamp)
-        (= "assistant" (:type m))
+        (and (= "assistant" (:type m))
+             (not (str/blank? content)))
         (assoc :last-message
-               (assistant-content (:message m)))))))
+               content)))))
 
 (defn- parse-codex-event [timestamp payload]
   (case (:type payload)

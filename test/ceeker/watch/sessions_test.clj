@@ -38,6 +38,17 @@
              :claude-code
              "{\"type\":\"file-history-snapshot\"}"))))
 
+(deftest test-parse-claude-tool-use-only-omits-last-message
+  (let [line (str "{\"sessionId\":\"claude-1\",\"cwd\":\"/tmp/w\","
+                  "\"timestamp\":\"2026-01-01T00:00:01Z\","
+                  "\"type\":\"assistant\","
+                  "\"message\":{\"content\":["
+                  "{\"type\":\"tool_use\",\"id\":\"toolu_1\","
+                  "\"name\":\"Bash\",\"input\":{\"command\":\"pwd\"}}"
+                  "]}}")
+        result (sessions/parse-jsonl-line :claude-code line)]
+    (is (not (contains? result :last-message)))))
+
 (deftest test-parse-codex-meta-and-complete
   (let [meta-line (str "{\"timestamp\":\"2026-01-01T00:00:00Z\","
                        "\"type\":\"session_meta\","
@@ -162,6 +173,37 @@
       (let [sessions-map (:sessions (store/read-sessions state-dir))]
         (is (= :running
                (get-in sessions-map ["claude-1" :agent-status])))
+        (is (= "working on it"
+               (get-in sessions-map ["claude-1" :last-message]))))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-keeps-claude-last-message-after-tool-use-only-assistant
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        claude-dir (io/file root "claude/-tmp-w")]
+    (try
+      (.mkdirs claude-dir)
+      (spit (io/file claude-dir "claude-1.jsonl")
+            (str "{\"sessionId\":\"claude-1\",\"cwd\":\"/tmp/w\","
+                 "\"timestamp\":\"2026-01-01T00:00:00Z\","
+                 "\"type\":\"assistant\","
+                 "\"message\":{\"content\":\"working on it\"}}\n"
+                 "{\"sessionId\":\"claude-1\",\"cwd\":\"/tmp/w\","
+                 "\"timestamp\":\"2026-01-01T00:00:01Z\","
+                 "\"type\":\"assistant\","
+                 "\"message\":{\"content\":["
+                 "{\"type\":\"tool_use\",\"id\":\"toolu_1\","
+                 "\"name\":\"Bash\",\"input\":{\"command\":\"pwd\"}}"
+                 "]}}\n"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (let [sessions-map (:sessions (store/read-sessions state-dir))]
         (is (= "working on it"
                (get-in sessions-map ["claude-1" :last-message]))))
       (finally
