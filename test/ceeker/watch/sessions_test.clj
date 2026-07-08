@@ -435,7 +435,29 @@
         (cleanup-dir root)
         (cleanup-dir state-dir)))))
 
-(deftest test-watch-path-does-not-apply-scan-liveness-check
+(deftest test-watch-skips-new-active-session-without-live-process
+  (let [state-dir (temp-dir)
+        file-states (atom {})
+        file (io/file (temp-dir) "claude-dead-event.jsonl")]
+    (try
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-in-tree (fn [_ _] :not-found)]
+        (#'sessions/process-lines!
+         state-dir file-states file
+         [(str "{\"sessionId\":\"claude-dead-event\","
+               "\"cwd\":\"/tmp/w\","
+               "\"timestamp\":\"" (iso-before 1000) "\","
+               "\"type\":\"user\"}")]))
+      (is (nil? (get-in (store/read-sessions state-dir)
+                        [:sessions "claude-dead-event"])))
+      (finally
+        (cleanup-dir (.getParent file))
+        (cleanup-dir state-dir)))))
+
+(deftest test-watch-keeps-new-active-session-with-live-process
   (let [state-dir (temp-dir)
         file-states (atom {})
         file (io/file (temp-dir) "claude-live-event.jsonl")]
@@ -444,16 +466,148 @@
                     pane/list-pane-info
                     (fn [] [{:pid "100" :pane-id "%1"
                              :cwd "/tmp/w"}])
-                    pane/find-agent-pid-in-tree (fn [_ _] nil)]
+                    pane/find-agent-in-tree (fn [_ _] :found)]
         (#'sessions/process-lines!
          state-dir file-states file
-         [(str "{\"sessionId\":\"claude-event\","
+         [(str "{\"sessionId\":\"claude-live-event\","
                "\"cwd\":\"/tmp/w\","
                "\"timestamp\":\"" (iso-before 1000) "\","
                "\"type\":\"user\"}")]))
       (is (= :running
              (get-in (store/read-sessions state-dir)
-                     [:sessions "claude-event" :agent-status])))
+                     [:sessions "claude-live-event"
+                      :agent-status])))
+      (finally
+        (cleanup-dir (.getParent file))
+        (cleanup-dir state-dir)))))
+
+(deftest test-watch-keeps-new-active-session-with-unknown-liveness
+  (let [state-dir (temp-dir)
+        file-states (atom {})
+        file (io/file (temp-dir) "claude-unknown-event.jsonl")]
+    (try
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-in-tree (fn [_ _] :unknown)]
+        (#'sessions/process-lines!
+         state-dir file-states file
+         [(str "{\"sessionId\":\"claude-unknown-event\","
+               "\"cwd\":\"/tmp/w\","
+               "\"timestamp\":\"" (iso-before 1000) "\","
+               "\"type\":\"user\"}")]))
+      (is (= :running
+             (get-in (store/read-sessions state-dir)
+                     [:sessions "claude-unknown-event"
+                      :agent-status])))
+      (finally
+        (cleanup-dir (.getParent file))
+        (cleanup-dir state-dir)))))
+
+(deftest test-watch-does-not-update-closed-session-without-live-process
+  (let [state-dir (temp-dir)
+        file-states (atom {})
+        file (io/file (temp-dir) "claude-closed-dead.jsonl")
+        original-ts "2026-01-01T00:00:00Z"]
+    (try
+      (store/update-session!
+       state-dir "claude-closed-dead"
+       {:session-id "claude-closed-dead"
+        :agent-type :claude-code
+        :agent-status :closed
+        :cwd "/tmp/w"
+        :pane-id ""
+        :last-updated original-ts
+        :last-message "closed"})
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-in-tree (fn [_ _] :not-found)]
+        (#'sessions/process-lines!
+         state-dir file-states file
+         [(str "{\"sessionId\":\"claude-closed-dead\","
+               "\"cwd\":\"/tmp/w\","
+               "\"timestamp\":\"2026-01-01T00:00:10Z\","
+               "\"type\":\"assistant\","
+               "\"message\":{\"content\":\"new\"}}")]))
+      (let [session (get-in (store/read-sessions state-dir)
+                            [:sessions "claude-closed-dead"])]
+        (is (= :closed (:agent-status session)))
+        (is (= original-ts (:last-updated session)))
+        (is (= "closed" (:last-message session))))
+      (finally
+        (cleanup-dir (.getParent file))
+        (cleanup-dir state-dir)))))
+
+(deftest test-watch-reactivates-closed-session-with-live-process
+  (let [state-dir (temp-dir)
+        file-states (atom {})
+        file (io/file (temp-dir) "claude-closed-live.jsonl")]
+    (try
+      (store/update-session!
+       state-dir "claude-closed-live"
+       {:session-id "claude-closed-live"
+        :agent-type :claude-code
+        :agent-status :closed
+        :cwd "/tmp/w"
+        :pane-id ""
+        :last-updated "2026-01-01T00:00:00Z"})
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-in-tree (fn [_ _] :found)]
+        (#'sessions/process-lines!
+         state-dir file-states file
+         [(str "{\"sessionId\":\"claude-closed-live\","
+               "\"cwd\":\"/tmp/w\","
+               "\"timestamp\":\"2026-01-01T00:00:10Z\","
+               "\"type\":\"assistant\","
+               "\"message\":{\"content\":\"running\"}}")]))
+      (let [session (get-in (store/read-sessions state-dir)
+                            [:sessions "claude-closed-live"])]
+        (is (= :running (:agent-status session)))
+        (is (= "2026-01-01T00:00:10Z"
+               (:last-updated session)))
+        (is (= "running" (:last-message session))))
+      (finally
+        (cleanup-dir (.getParent file))
+        (cleanup-dir state-dir)))))
+
+(deftest test-watch-does-not-update-completed-session
+  (let [state-dir (temp-dir)
+        file-states (atom {})
+        file (io/file (temp-dir) "claude-completed.jsonl")
+        original-ts "2026-01-01T00:00:00Z"]
+    (try
+      (store/update-session!
+       state-dir "claude-completed"
+       {:session-id "claude-completed"
+        :agent-type :claude-code
+        :agent-status :completed
+        :cwd "/tmp/w"
+        :pane-id ""
+        :last-updated original-ts
+        :last-message "done"})
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-in-tree (fn [_ _] :found)]
+        (#'sessions/process-lines!
+         state-dir file-states file
+         [(str "{\"sessionId\":\"claude-completed\","
+               "\"cwd\":\"/tmp/w\","
+               "\"timestamp\":\"2026-01-01T00:00:10Z\","
+               "\"type\":\"assistant\","
+               "\"message\":{\"content\":\"new\"}}")]))
+      (let [session (get-in (store/read-sessions state-dir)
+                            [:sessions "claude-completed"])]
+        (is (= :completed (:agent-status session)))
+        (is (= original-ts (:last-updated session)))
+        (is (= "done" (:last-message session))))
       (finally
         (cleanup-dir (.getParent file))
         (cleanup-dir state-dir)))))
@@ -463,7 +617,8 @@
         file-states (atom {})
         file (io/file (temp-dir) "claude-metadata.jsonl")]
     (try
-      (with-redefs [sessions/resolve-pane-id (fn [_] nil)]
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info (fn [] nil)]
         (#'sessions/process-lines!
          state-dir file-states file
          [(str "{\"type\":\"ai-title\",\"aiTitle\":\"title\","

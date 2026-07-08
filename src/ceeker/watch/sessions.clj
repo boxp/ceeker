@@ -209,50 +209,115 @@
 (def ^:private terminal-statuses
   #{:closed :completed :error})
 
+(def ^:private pane-infos-not-supplied
+  ::pane-infos-not-supplied)
+
 (defn- expired-terminal-session? [session now-ms]
   (and (contains? terminal-statuses (:agent-status session))
        (> (- now-ms (session-time-ms session))
           store/closed-ttl-ms)))
 
-(defn- should-write-scan-session? [session]
+(defn- derefable? [x]
+  (instance? clojure.lang.IDeref x))
+
+(defn- pane-infos-value [pane-infos]
   (cond
-    (expired-terminal-session?
-     session (System/currentTimeMillis))
-    false
+    (= pane-infos-not-supplied pane-infos)
+    (pane/list-pane-info)
 
-    (and (contains? store/capturable-statuses
-                    (:agent-status session))
-         (not (seq (:pane-id session))))
-    (let [pane-infos (pane/list-pane-info)]
-      (or (nil? pane-infos)
-          (not= :dead
-                (pane/session-has-live-agent?
-                 session pane-infos))))
+    (derefable? pane-infos)
+    @pane-infos
 
-    :else true))
+    :else pane-infos))
+
+(defn- session-liveness [session pane-infos]
+  (when-let [pane-infos (pane-infos-value pane-infos)]
+    (pane/session-has-live-agent? session pane-infos)))
+
+(defn- should-write-active-session? [session pane-infos]
+  (if (and (contains? store/capturable-statuses
+                      (:agent-status session))
+           (not (seq (:pane-id session))))
+    (not= :dead (session-liveness session pane-infos))
+    true))
+
+(defn- should-write-scan-session?
+  ([session]
+   (should-write-scan-session? session pane-infos-not-supplied))
+  ([session pane-infos]
+   (cond
+     (expired-terminal-session?
+      session (System/currentTimeMillis))
+     false
+
+     :else
+     (should-write-active-session? session pane-infos))))
+
+(defn- existing-session-entry [sessions session]
+  (let [sid (:session-id session)]
+    (some (fn [[k s]]
+            (when (= sid (:session-id s)) [k s]))
+          sessions)))
+
+(defn- reactivate-closed-watch-session!
+  [state-dir session-key session pane-infos]
+  (when (and (contains? store/capturable-statuses
+                        (:agent-status session))
+             (= :alive (session-liveness session pane-infos)))
+    (store/reactivate-closed-session!
+     state-dir session-key session)))
+
+(defn- write-new-session? [scan? session pane-infos]
+  (if scan?
+    (should-write-scan-session? session pane-infos)
+    (should-write-active-session? session pane-infos)))
+
+(defn- skip-session? [scan? session]
+  (and scan?
+       (expired-terminal-session?
+        session (System/currentTimeMillis))))
+
+(defn- normalize-session [session]
+  (cond-> session
+    (nil? (:last-updated session))
+    (assoc :last-updated (now-iso))
+
+    (nil? (:pane-id session))
+    (assoc :pane-id (resolve-pane-id session))))
+
+(defn- write-session-to-store!
+  [state-dir state session scan? pane-infos]
+  (let [[existing-key existing] (existing-session-entry
+                                 (:sessions state) session)
+        key (or existing-key
+                (:pane-id session)
+                (:session-id session))
+        pane-infos (or pane-infos pane-infos-not-supplied)]
+    (cond
+      (contains? terminal-statuses (:agent-status existing))
+      (when (and (= :closed (:agent-status existing))
+                 (should-write? state session))
+        (reactivate-closed-watch-session!
+         state-dir key session pane-infos))
+
+      existing
+      (when (should-write? state session)
+        (store/update-session! state-dir key session))
+
+      (write-new-session? scan? session pane-infos)
+      (store/update-session! state-dir key session))))
 
 (defn- write-session!
   ([state-dir session] (write-session! state-dir session {}))
-  ([state-dir session {:keys [scan?]}]
+  ([state-dir session {:keys [scan? pane-infos]}]
    (when (and (seq (:session-id session))
               (seq (:cwd session)))
-     (let [session (cond-> session
-                     (nil? (:last-updated session))
-                     (assoc :last-updated (now-iso)))]
-       (when (or (not scan?)
-                 (not (expired-terminal-session?
-                       session (System/currentTimeMillis))))
-         (let [session (cond-> session
-                         (nil? (:pane-id session))
-                         (assoc :pane-id (resolve-pane-id session)))]
-           (when (or (not scan?)
-                     (should-write-scan-session? session))
-             (let [state (store/read-sessions state-dir)
-                   key (or (:pane-id session)
-                           (:session-id session))]
-               (when (should-write? state session)
-                 (store/update-session!
-                  state-dir key session))))))))))
+     (let [session (normalize-session session)]
+       (when-not (skip-session? scan? session)
+         (write-session-to-store!
+          state-dir
+          (store/read-sessions state-dir)
+          session scan? pane-infos))))))
 
 (defn- merge-event [acc event]
   (let [last-message (if (contains? event :last-message)
@@ -374,7 +439,7 @@
 
 (defn- handle-watch-event!
   [^WatchService ws key->dir offsets file-states state-dir
-   ^WatchKey key ^WatchEvent evt]
+   ^WatchKey key ^WatchEvent evt opts]
   (let [kind (.kind evt)
         file (event-file key->dir key evt)]
     (when (and (= kind StandardWatchEventKinds/ENTRY_CREATE)
@@ -382,7 +447,8 @@
       (register-recursive! ws key->dir (.getPath file)))
     (when (jsonl-file? file)
       (process-lines! state-dir file-states file
-                      (tail-new-lines! offsets file)))))
+                      (tail-new-lines! offsets file)
+                      opts))))
 
 (defn- watch-context [claude-root codex-root pi-root]
   (let [ws (.newWatchService (FileSystems/getDefault))
@@ -399,11 +465,12 @@
   (when-let [^WatchKey key
              (.poll ^WatchService (:watch-service ctx)
                     0 TimeUnit/MILLISECONDS)]
-    (doseq [evt (.pollEvents key)]
-      (handle-watch-event!
-       (:watch-service ctx) (:key->dir ctx)
-       (:offsets ctx) (:file-states ctx)
-       state-dir key evt))
+    (let [opts {:pane-infos (delay (pane/list-pane-info))}]
+      (doseq [evt (.pollEvents key)]
+        (handle-watch-event!
+         (:watch-service ctx) (:key->dir ctx)
+         (:offsets ctx) (:file-states ctx)
+         state-dir key evt opts)))
     (.reset key)))
 
 (defn run-watch-loop!
