@@ -262,7 +262,7 @@ Codex は `notify` コマンドの最後の引数として JSON ペイロード�
 
 Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) は**実験的（experimental）**な hooks エンジンで `SessionStart` / `Stop` イベントをサポートしています。
 
-> **非推奨:** Codex v0.142.5 時点では hooks エンジンは async 実行をサポートしていません。`hooks.json` で `"async": true` を設定しても全hookが同期実行され、Codex の応答性が大幅に低下する可能性があります。現時点では上記の `notify` を使用してください。Codex 側で async hooks がサポートされたら再検討してください。
+> **非推奨:** Codex v0.142.5 時点では hooks エンジンは async 実行をサポートしていません。`hooks.json` の `"async"` 設定値に関わらず全hookが同期実行され、Codex の応答性が大幅に低下する可能性があります。現時点では上記の `notify` を使用してください。Codex 側で async hooks がサポートされたら再検討してください。
 >
 > `codex_hooks` は現在**実験的な機能**であり、将来のリリースで API が変更される可能性があります。
 
@@ -294,7 +294,7 @@ codex_hooks = true
           {
             "type": "command",
             "command": "ceeker hook codex SessionStart",
-            "async": true
+            "async": false
           }
         ]
       }
@@ -305,7 +305,7 @@ codex_hooks = true
           {
             "type": "command",
             "command": "ceeker hook codex Stop",
-            "async": true
+            "async": false
           }
         ]
       }
@@ -323,7 +323,7 @@ Codex は現在 async hooks をサポートしていないため、この設定�
 | 症状 | 原因 | 対処法 |
 |------|------|--------|
 | Codex 起動後も ceeker にセッションが表示されない | Feature flag `codex_hooks` が未有効 | `codex features enable codex_hooks` を実行、または `~/.codex/config.toml` に `[features] codex_hooks = true` を追加 |
-| Codex の応答性が明らかに低下する | Codex は現在 `"async": true` を設定しても hooks を同期実行する | Codex が async hooks をサポートするまで hooks ではなく `notify` を使用 |
+| Codex の応答性が明らかに低下する | Codex は現在 `"async"` の設定値に関わらず hooks を同期実行する | Codex が async hooks をサポートするまで hooks ではなく `notify` を使用 |
 | セッションイベントが重複する | `hooks.json` と `config.toml` の `notify` が両方有効 | `config.toml` から `notify` 行を削除 |
 
 ## セッション自動整理

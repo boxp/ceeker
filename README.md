@@ -262,7 +262,7 @@ Codex appends the JSON payload as the last argument of the `notify` command (via
 
 Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) supports `SessionStart` and `Stop` events via its **experimental** hooks engine.
 
-> **Not recommended:** As of Codex v0.142.5, the hooks engine does not support async execution. Even when `"async": true` is set in `hooks.json`, all hooks run synchronously and can significantly reduce Codex responsiveness. Use `notify` above for now. Reconsider hooks after Codex adds async hooks support.
+> **Not recommended:** As of Codex v0.142.5, the hooks engine does not support async execution. Hooks run synchronously regardless of the `"async"` value in `hooks.json`, which can significantly reduce Codex responsiveness. Use `notify` above for now. Reconsider hooks after Codex adds async hooks support.
 >
 > The `codex_hooks` feature is currently **experimental** and its API may change in future releases.
 
@@ -294,7 +294,7 @@ codex_hooks = true
           {
             "type": "command",
             "command": "ceeker hook codex SessionStart",
-            "async": true
+            "async": false
           }
         ]
       }
@@ -305,7 +305,7 @@ codex_hooks = true
           {
             "type": "command",
             "command": "ceeker hook codex Stop",
-            "async": true
+            "async": false
           }
         ]
       }
@@ -323,7 +323,7 @@ Because async hooks are not currently supported by Codex, this setup is not reco
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | No session appears in ceeker after starting Codex | Feature flag `codex_hooks` is not enabled | Run `codex features enable codex_hooks` or add `[features] codex_hooks = true` to `~/.codex/config.toml` |
-| Codex becomes noticeably less responsive | Codex currently runs hooks synchronously even when `"async": true` is set | Use `notify` instead of hooks until Codex supports async hooks |
+| Codex becomes noticeably less responsive | Codex currently runs hooks synchronously regardless of the `"async"` value | Use `notify` instead of hooks until Codex supports async hooks |
 | Duplicate session events | Both `hooks.json` and `notify` in `config.toml` are active | Remove the `notify` line from `config.toml` |
 
 ## Automatic Session Cleanup
