@@ -24,3 +24,11 @@ Detect Claude Code and Codex sessions from their JSONL session history files so 
 - Store tests cover session-id deduplication.
 - Scan tests use temporary fixture directories.
 - Worker tests verify stop-channel shutdown.
+
+## Review Fix Plan
+
+- Add regression coverage for Claude assistant JSONL lines so `:last-message` remains available after scan, including when a following non-message event arrives.
+- Add regression coverage for synchronous scans when a JSONL file disappears between enumeration and opening; the scan should warn on stderr and continue.
+- Update session event merging to preserve incoming `:last-message` for any status and keep the accumulated value when later events omit it.
+- Wrap per-file scan reads in `try`/`catch` so unreadable files are skipped without aborting startup or `--list-sessions`.
+- Run `make ci` and commit the fix in English.

@@ -191,11 +191,14 @@
         (store/update-session! state-dir key session)))))
 
 (defn- merge-event [acc event]
-  (let [merged (merge acc event)]
-    (if (and (= :completed (:agent-status event))
-             (:last-message event))
-      merged
-      (dissoc merged :last-message))))
+  (let [last-message (if (contains? event :last-message)
+                       (:last-message event)
+                       (:last-message acc))]
+    (cond-> (merge acc event)
+      (some? last-message)
+      (assoc :last-message last-message)
+      (nil? last-message)
+      (dissoc :last-message))))
 
 (defn- file-agent-type [^File file]
   (let [path (.getPath file)]
@@ -249,9 +252,15 @@
          file-states (atom {})]
      (doseq [file (concat (session-files claude-root cutoff-ms)
                           (session-files codex-root cutoff-ms))]
-       (with-open [reader (io/reader file)]
-         (process-lines! state-dir file-states file
-                         (doall (line-seq reader))))))))
+       (try
+         (with-open [reader (io/reader file)]
+           (process-lines! state-dir file-states file
+                           (doall (line-seq reader))))
+         (catch Exception e
+           (binding [*out* *err*]
+             (println "Skipping unreadable session file"
+                      (.getPath ^File file)
+                      (str "(" (.getMessage e) ")")))))))))
 
 (defn- close-watch-service! [^WatchService ws]
   (when ws (.close ws)))

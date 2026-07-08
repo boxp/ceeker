@@ -139,16 +139,72 @@
         (cleanup-dir root)
         (cleanup-dir state-dir)))))
 
+(deftest test-scan-keeps-claude-assistant-last-message
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        claude-dir (io/file root "claude/-tmp-w")]
+    (try
+      (.mkdirs claude-dir)
+      (spit (io/file claude-dir "claude-1.jsonl")
+            (str "{\"sessionId\":\"claude-1\",\"cwd\":\"/tmp/w\","
+                 "\"timestamp\":\"2026-01-01T00:00:00Z\","
+                 "\"type\":\"assistant\","
+                 "\"message\":{\"content\":\"working on it\"}}\n"
+                 "{\"sessionId\":\"claude-1\",\"cwd\":\"/tmp/w\","
+                 "\"timestamp\":\"2026-01-01T00:00:01Z\","
+                 "\"type\":\"user\"}\n"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (let [sessions-map (:sessions (store/read-sessions state-dir))]
+        (is (= :running
+               (get-in sessions-map ["claude-1" :agent-status])))
+        (is (= "working on it"
+               (get-in sessions-map ["claude-1" :last-message]))))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-skips-files-deleted-before-open
+  (let [state-dir (temp-dir)
+        missing-file (io/file "/tmp/ceeker-missing-session.jsonl")]
+    (try
+      (with-redefs [sessions/session-files
+                    (fn [root _cutoff-ms]
+                      (if (= root "/missing-root")
+                        [missing-file]
+                        []))
+                    sessions/resolve-pane-id (fn [_] nil)]
+        (let [err (java.io.StringWriter.)]
+          (binding [*err* err]
+            (sessions/scan-recent-sessions!
+             {:claude-root "/missing-root"
+              :codex-root "/empty-root"
+              :state-dir state-dir
+              :since-hours 24}))
+          (is (re-find #"Skipping unreadable session file"
+                       (str err)))))
+      (finally
+        (cleanup-dir state-dir)))))
+
 (deftest test-start-session-watcher-stops
   (testing "worker stops after stop channel close"
-    (let [calls (atom 0)]
+    (let [calls (atom 0)
+          started (promise)
+          stopped (promise)]
       (with-redefs [sessions/run-watch-loop!
                     (fn [stop-ch _opts]
                       (swap! calls inc)
+                      (deliver started true)
                       (async/<!! stop-ch)
-                      (swap! calls inc))]
+                      (swap! calls inc)
+                      (deliver stopped true))]
         (let [stop-ch (sessions/start-session-watcher! {})]
+          (is (true? (deref started 1000 false)))
           (is (= 1 @calls))
           (async/close! stop-ch)
-          (Thread/sleep 100)
+          (is (true? (deref stopped 1000 false)))
           (is (= 2 @calls)))))))
