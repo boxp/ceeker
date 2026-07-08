@@ -302,6 +302,24 @@
       (is (= :unknown (pane/find-agent-in-tree
                        "999999" :claude-code))))))
 
+(deftest test-find-agent-pid-in-tree-returns-matching-pid
+  (testing "returns the pid whose command line matches the agent"
+    (with-redefs [ceeker.tmux.pane/read-proc-cmdline
+                  (fn [pid]
+                    (case (str pid)
+                      "10" "zsh"
+                      "11" "/usr/bin/codex"
+                      nil))
+                  ceeker.tmux.pane/child-pids
+                  (fn [pid]
+                    (case (str pid)
+                      "10" ["11"]
+                      []))
+                  ceeker.tmux.pane/process-alive?
+                  (fn [_] true)]
+      (is (= "11" (pane/find-agent-pid-in-tree
+                   "10" :codex))))))
+
 ;; --- stale session tests ---
 
 (deftest test-stale-keeps-sole-live-session

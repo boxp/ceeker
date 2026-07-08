@@ -101,25 +101,85 @@
     incoming
     existing))
 
+(defn- pane-key?
+  "Returns true when key is the canonical pane key for session."
+  [key session]
+  (and (seq (:pane-id session))
+       (= key (:pane-id session))))
+
+(defn- pick-session-id-duplicate
+  "Picks one entry among entries with the same :session-id.
+   A pane-id keyed entry is preferred because pane-id is the
+   canonical live-session key. Otherwise the newest entry wins."
+  [[existing-key existing :as existing-entry]
+   [incoming-key incoming :as incoming-entry]]
+  (let [existing-pane? (pane-key? existing-key existing)
+        incoming-pane? (pane-key? incoming-key incoming)]
+    (cond
+      (and incoming-pane? (not existing-pane?))
+      incoming-entry
+      (and existing-pane? (not incoming-pane?))
+      existing-entry
+      :else
+      (if (= incoming (pick-newer existing incoming))
+        incoming-entry
+        existing-entry))))
+
+(defn- canonicalize-by-pane [sessions]
+  (reduce-kv
+   (fn [acc key session]
+     (let [pane-id (:pane-id session)
+           canonical (if (seq pane-id) pane-id key)]
+       (if-let [existing (get acc canonical)]
+         (assoc acc canonical
+                (pick-newer existing session))
+         (assoc acc canonical session))))
+   {}
+   sessions))
+
+(defn- session-id-winners [sessions]
+  (reduce-kv
+   (fn [acc key session]
+     (if-let [session-id (:session-id session)]
+       (if-let [existing-entry (get acc session-id)]
+         (assoc acc session-id
+                (pick-session-id-duplicate
+                 existing-entry [key session]))
+         (assoc acc session-id [key session]))
+       acc))
+   {}
+   sessions))
+
+(defn- session-id-keys [sessions winners]
+  (into #{}
+        (map first)
+        (filter (fn [[_key session]]
+                  (contains? winners
+                             (:session-id session)))
+                sessions)))
+
 (defn normalize-sessions
   "Re-keys sessions by :pane-id (canonical key).
    Entries with non-empty :pane-id are keyed by pane-id;
    entries without :pane-id keep their original key.
    When multiple entries share the same pane-id, the one
-   with the latest :last-updated wins.
+   with the latest :last-updated wins. When multiple entries
+   share the same :session-id, they are deduplicated and
+   pane-id keyed entries are preferred.
    Returns empty map when sessions is nil."
   [sessions]
   (if (nil? sessions)
     {}
-    (reduce-kv
-     (fn [acc key session]
-       (let [pane-id (:pane-id session)
-             canonical (if (seq pane-id) pane-id key)]
-         (if-let [existing (get acc canonical)]
-           (assoc acc canonical (pick-newer existing session))
-           (assoc acc canonical session))))
-     {}
-     sessions)))
+    (let [by-pane
+          (canonicalize-by-pane sessions)
+          by-session (session-id-winners by-pane)
+          duplicate-keys (session-id-keys by-pane by-session)]
+      (merge
+       (apply dissoc by-pane duplicate-keys)
+       (into {}
+             (map (fn [[_session-id [key session]]]
+                    [key session]))
+             by-session)))))
 
 (defn- read-state-file
   "Reads and parses the sessions.edn file.

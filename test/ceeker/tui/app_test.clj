@@ -4,6 +4,7 @@
             [ceeker.tui.filter :as f]
             [ceeker.tui.input]
             [ceeker.tui.watcher]
+            [ceeker.watch.sessions]
             [clojure.core.async :as async]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
@@ -342,6 +343,10 @@
                       (fn [_] :watcher)
                       ceeker.tui.app/start-pane-checker!
                       (fn [_] :stop-ch)
+                      ceeker.watch.sessions/scan-recent-sessions!
+                      (fn [_])
+                      ceeker.watch.sessions/start-session-watcher!
+                      (fn [_] :session-stop-ch)
                       ceeker.tui.app/tui-loop
                       (fn [& _])
                       ceeker.tui.input/create-terminal-profile
@@ -375,6 +380,10 @@
                       (fn [_] :watcher)
                       ceeker.tui.app/start-pane-checker!
                       (fn [_] :stop-ch)
+                      ceeker.watch.sessions/scan-recent-sessions!
+                      (fn [_])
+                      ceeker.watch.sessions/start-session-watcher!
+                      (fn [_] :session-stop-ch)
                       ceeker.tui.app/tui-loop
                       (fn [& _])
                       ceeker.tui.input/create-terminal-profile
@@ -477,6 +486,10 @@
                     (fn [_] nil)
                     ceeker.tui.app/start-pane-checker!
                     (fn [_] stop-ch)
+                    ceeker.watch.sessions/scan-recent-sessions!
+                    (fn [_])
+                    ceeker.watch.sessions/start-session-watcher!
+                    (fn [_] (async/chan))
                     ceeker.tui.input/create-terminal-profile
                     (fn []
                       {:terminal ::terminal

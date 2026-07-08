@@ -1,7 +1,8 @@
 (ns ceeker.session-list
   "Shared session list access for TUI and CLI."
   (:require [ceeker.state.store :as store]
-            [ceeker.tmux.pane :as pane]))
+            [ceeker.tmux.pane :as pane]
+            [ceeker.watch.sessions :as session-watch]))
 
 (defn sort-sessions
   "Sorts sessions the same way as the TUI list."
@@ -24,6 +25,7 @@
 (defn refresh-session-state!
   "Refreshes pane liveness and capture-based session states once."
   [state-dir]
+  (session-watch/scan-recent-sessions! {:state-dir state-dir})
   (pane/close-stale-sessions! state-dir)
   (pane/refresh-session-states! state-dir))
 
