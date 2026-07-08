@@ -227,7 +227,7 @@
                     pane/list-pane-info
                     (fn [] [{:pid "100" :pane-id "%1"
                              :cwd "/tmp/w"}])
-                    pane/find-agent-pid-in-tree (fn [_ _] nil)]
+                    pane/find-agent-in-tree (fn [_ _] :not-found)]
         (sessions/scan-recent-sessions!
          {:claude-root (.getPath (io/file root "claude"))
           :codex-root (.getPath (io/file root "codex"))
@@ -235,6 +235,34 @@
           :since-hours 24}))
       (is (nil? (get-in (store/read-sessions state-dir)
                         [:sessions "claude-dead"])))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-keeps-active-session-with-unknown-liveness
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        claude-dir (io/file root "claude/-tmp-w")]
+    (try
+      (.mkdirs claude-dir)
+      (spit (io/file claude-dir "claude-unknown.jsonl")
+            (str "{\"sessionId\":\"claude-unknown\","
+                 "\"cwd\":\"/tmp/w\","
+                 "\"timestamp\":\"" (iso-before 1000) "\","
+                 "\"type\":\"user\"}\n"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-in-tree (fn [_ _] :unknown)]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (is (= :running
+             (get-in (store/read-sessions state-dir)
+                     [:sessions "claude-unknown" :agent-status])))
       (finally
         (cleanup-dir root)
         (cleanup-dir state-dir)))))
@@ -254,11 +282,11 @@
                     pane/list-pane-info
                     (fn [] [{:pid "100" :pane-id "%1"
                              :cwd "/tmp/w"}])
-                    pane/find-agent-pid-in-tree
+                    pane/find-agent-in-tree
                     (fn [pid agent-type]
                       (when (and (= "100" pid)
                                  (= :claude-code agent-type))
-                        "200"))]
+                        :found))]
         (sessions/scan-recent-sessions!
          {:claude-root (.getPath (io/file root "claude"))
           :codex-root (.getPath (io/file root "codex"))

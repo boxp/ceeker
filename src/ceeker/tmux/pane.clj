@@ -201,7 +201,7 @@
             children agent-type
             (dec max-depth))))))))
 
-(defn- session-has-live-agent?
+(defn session-has-live-agent?
   "Checks if a session's agent is alive by searching the
    process tree of matching tmux panes.
    Prefers pane-id match over cwd-only match.

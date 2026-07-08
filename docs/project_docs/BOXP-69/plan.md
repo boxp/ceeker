@@ -29,3 +29,9 @@ Fix two regressions introduced by the session history file watcher:
 The startup scan preserves non-tmux behavior when tmux is unavailable: `pane/list-pane-info` returning nil allows active sessions to be written as before.
 
 For stale cleanup, pane-id-less non-tmux sessions only reach the changed branch when their cwd matches a currently live tmux pane cwd. If no pane cwd matches, they still follow the existing `(not cwd-present?)` branch and are closed. When the cwd does match a live pane, the previous behavior could keep a dead watcher-created session visible forever. Delegating to `session-has-live-agent?` improves that case by closing only when the cwd-matching pane's process tree is definitely dead for the agent; `:unknown` remains non-stale, preserving conservative behavior.
+
+## Review follow-up: scan unknown liveness
+
+Codex review pointed out that startup scan still used `find-agent-pid-in-tree`, which collapses both definitely dead agents and unreadable process information to nil. That made scan stricter than stale cleanup: an active session whose matching tmux pane had unknown process-tree liveness could be skipped even though cleanup treats unknown as non-stale.
+
+The follow-up keeps one shared liveness policy by making `ceeker.tmux.pane/session-has-live-agent?` public and using it from `ceeker.watch.sessions`. Scan now skips active pane-id-less sessions only when liveness is exactly `:dead`; `:alive` and `:unknown` are both written. Tests cover the new `:unknown` path and retain the existing `:dead` skip behavior.

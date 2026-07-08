@@ -188,14 +188,6 @@
        (> (- now-ms (session-time-ms session))
           store/closed-ttl-ms)))
 
-(defn- live-agent-in-cwd-pane? [{:keys [cwd agent-type]} pane-infos]
-  (boolean
-   (some (fn [p]
-           (when (= cwd (:cwd p))
-             (pane/find-agent-pid-in-tree
-              (:pid p) agent-type)))
-         pane-infos)))
-
 (defn- should-write-scan-session? [session]
   (cond
     (expired-terminal-session?
@@ -207,7 +199,9 @@
          (not (seq (:pane-id session))))
     (let [pane-infos (pane/list-pane-info)]
       (or (nil? pane-infos)
-          (live-agent-in-cwd-pane? session pane-infos)))
+          (not= :dead
+                (pane/session-has-live-agent?
+                 session pane-infos))))
 
     :else true))
 
