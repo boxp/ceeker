@@ -196,6 +196,47 @@
   [path state]
   (spit path (pr-str state)))
 
+(def ^:private transition-log-max-bytes
+  1048576)
+
+(defn- transition-log-path [dir]
+  (str dir "/transitions.log"))
+
+(defn- transition-log-old-path [dir]
+  (str dir "/transitions.log.old"))
+
+(defn- transition-event [event key session]
+  {:at (.toString (java.time.Instant/now))
+   :event event
+   :key key
+   :session-id (:session-id session)
+   :agent-type (:agent-type session)})
+
+(defn- rotate-transition-log-if-needed! [dir]
+  (let [log-file (io/file (transition-log-path dir))]
+    (when (and (.exists log-file)
+               (.isFile log-file)
+               (> (.length log-file) transition-log-max-bytes))
+      (let [old-file (io/file (transition-log-old-path dir))]
+        (when (.exists old-file)
+          (Files/delete (.toPath old-file)))
+        (Files/move (.toPath log-file)
+                    (.toPath old-file)
+                    (make-array java.nio.file.CopyOption 0))))))
+
+(defn- append-transition-log! [dir event key session]
+  (try
+    (rotate-transition-log-if-needed! dir)
+    (spit (transition-log-path dir)
+          (str (pr-str (transition-event event key session))
+               "\n")
+          :append true)
+    (catch Exception e
+      (let [writer (java.io.PrintWriter. *err*)]
+        (.println writer "Failed to write transition log")
+        (.printStackTrace e writer)
+        (.flush writer)))))
+
 (def ^:private jvm-lock
   "JVM-level lock to coordinate threads within the same
    process. Prevents OverlappingFileLockException when
@@ -312,6 +353,8 @@
                 (assoc-in state
                           [:sessions session-key]
                           updated))
+               (append-transition-log!
+                dir :reactivate session-key updated)
                true)
              false)))))))
 
@@ -338,8 +381,8 @@
 
 (def ^:const closed-ttl-ms
   "Time-to-live (ms) for closed sessions before purging.
-   Default: 5 minutes."
-  300000)
+   Default: 60 seconds."
+  60000)
 
 (defn- expired-terminal?
   "Returns true if session has a terminal status and its
@@ -371,6 +414,14 @@
                               ttl-ms live-pane-ids))
                 sessions)))
 
+(defn- purgeable-sessions
+  "Returns entries that should be purged."
+  [sessions now-ms ttl-ms live-pane-ids]
+  (filter (fn [[_key session]]
+            (purgeable? session now-ms
+                        ttl-ms live-pane-ids))
+          sessions))
+
 (defn purge-expired-closed-sessions!
   "Removes terminal sessions (closed/completed/error) that
    have exceeded the TTL and whose pane-id is not in the
@@ -387,27 +438,34 @@
      (with-file-lock dir
        (fn []
          (let [state (read-state-file path)
+               purged (purgeable-sessions
+                       (:sessions state)
+                       now-ms ttl-ms live-pane-ids)
                remaining (purge-sessions
                           (:sessions state)
                           now-ms ttl-ms live-pane-ids)]
            (write-state-file!
             path
-            (assoc state :sessions remaining))))))))
+            (assoc state :sessions remaining))
+           (doseq [[key session] purged]
+             (append-transition-log!
+              dir :purge key session))))))))
 
-(defn- apply-stale-pred
-  "Returns updated sessions map, closing active sessions
-   for which stale-pred returns true."
+(defn- apply-stale-pred-with-closed
+  "Returns [updated-sessions closed-entries]."
   [sessions stale-pred now]
   (let [close-data {:agent-status :closed
                     :last-updated now}]
     (reduce-kv
-     (fn [m key session]
+     (fn [[m closed] key session]
        (if (and (contains? capturable-statuses
                            (:agent-status session))
                 (stale-pred key session))
-         (assoc m key (merge session close-data))
-         m))
-     sessions
+         (let [updated (merge session close-data)]
+           [(assoc m key updated)
+            (conj closed [key updated])])
+         [m closed]))
+     [sessions []]
      sessions)))
 
 (defn close-sessions-by-pred!
@@ -421,9 +479,12 @@
      (with-file-lock dir
        (fn []
          (let [state (read-state-file path)
-               updated (apply-stale-pred
-                        (:sessions state)
-                        stale-pred now)]
+               [updated closed] (apply-stale-pred-with-closed
+                                 (:sessions state)
+                                 stale-pred now)]
            (write-state-file!
             path
-            (assoc state :sessions updated))))))))
+            (assoc state :sessions updated))
+           (doseq [[key session] closed]
+             (append-transition-log!
+              dir :close key session))))))))
