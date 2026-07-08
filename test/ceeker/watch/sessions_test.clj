@@ -19,6 +19,19 @@
       (doseq [file (reverse (file-seq f))]
         (.delete file)))))
 
+(defn- iso-before [millis]
+  (.toString (.minusMillis (java.time.Instant/now) millis)))
+
+(defn- codex-session-lines [session-id cwd timestamp status]
+  (str "{\"timestamp\":\"" timestamp "\","
+       "\"type\":\"session_meta\","
+       "\"payload\":{\"session_id\":\"" session-id "\","
+       "\"cwd\":\"" cwd "\"}}\n"
+       "{\"timestamp\":\"" timestamp "\","
+       "\"type\":\"event_msg\","
+       "\"payload\":{\"type\":\"" status "\","
+       "\"last_agent_message\":\"done\"}}\n"))
+
 (deftest test-parse-claude-line
   (let [line (str "{\"sessionId\":\"claude-1\",\"cwd\":\"/tmp/w\","
                   "\"timestamp\":\"2026-01-01T00:00:00Z\","
@@ -116,24 +129,26 @@
   (let [root (temp-dir)
         state-dir (temp-dir)
         codex-dir (io/file root "codex/2026/01/01")
-        claude-dir (io/file root "claude/-tmp-w")]
+        claude-dir (io/file root "claude/-tmp-w")
+        recent-ts (iso-before 1000)]
     (try
       (.mkdirs codex-dir)
       (.mkdirs claude-dir)
       (spit (io/file codex-dir "rollout-2026-01-01T00-00-00Z-u.jsonl")
-            (str "{\"timestamp\":\"2026-01-01T00:00:00Z\","
+            (str "{\"timestamp\":\"" recent-ts "\","
                  "\"type\":\"session_meta\","
                  "\"payload\":{\"session_id\":\"codex-1\","
                  "\"cwd\":\"/tmp/w\"}}\n"
-                 "{\"timestamp\":\"2026-01-01T00:00:01Z\","
+                 "{\"timestamp\":\"" recent-ts "\","
                  "\"type\":\"event_msg\","
                  "\"payload\":{\"type\":\"task_complete\","
                  "\"last_agent_message\":\"done\"}}\n"))
       (spit (io/file claude-dir "claude-1.jsonl")
             (str "{\"sessionId\":\"claude-1\",\"cwd\":\"/tmp/w\","
-                 "\"timestamp\":\"2026-01-01T00:00:02Z\","
+                 "\"timestamp\":\"" recent-ts "\","
                  "\"type\":\"user\"}\n"))
-      (with-redefs [sessions/resolve-pane-id (fn [_] nil)]
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info (fn [] nil)]
         (sessions/scan-recent-sessions!
          {:claude-root (.getPath (io/file root "claude"))
           :codex-root (.getPath (io/file root "codex"))
@@ -150,6 +165,162 @@
         (cleanup-dir root)
         (cleanup-dir state-dir)))))
 
+(deftest test-scan-skips-terminal-session-older-than-closed-ttl
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        codex-dir (io/file root "codex/2026/01/01")
+        old-ts (iso-before (+ store/closed-ttl-ms 1000))]
+    (try
+      (.mkdirs codex-dir)
+      (spit (io/file codex-dir "rollout-old.jsonl")
+            (codex-session-lines "codex-old" "/tmp/w"
+                                 old-ts "task_complete"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info (fn [] nil)]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (is (nil? (get-in (store/read-sessions state-dir)
+                        [:sessions "codex-old"])))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-keeps-terminal-session-within-closed-ttl
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        codex-dir (io/file root "codex/2026/01/01")
+        recent-ts (iso-before 1000)]
+    (try
+      (.mkdirs codex-dir)
+      (spit (io/file codex-dir "rollout-recent.jsonl")
+            (codex-session-lines "codex-recent" "/tmp/w"
+                                 recent-ts "task_complete"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info (fn [] nil)]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (is (= :completed
+             (get-in (store/read-sessions state-dir)
+                     [:sessions "codex-recent" :agent-status])))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-skips-active-session-without-live-process
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        claude-dir (io/file root "claude/-tmp-w")]
+    (try
+      (.mkdirs claude-dir)
+      (spit (io/file claude-dir "claude-dead.jsonl")
+            (str "{\"sessionId\":\"claude-dead\","
+                 "\"cwd\":\"/tmp/w\","
+                 "\"timestamp\":\"" (iso-before 1000) "\","
+                 "\"type\":\"user\"}\n"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-pid-in-tree (fn [_ _] nil)]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (is (nil? (get-in (store/read-sessions state-dir)
+                        [:sessions "claude-dead"])))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-keeps-active-session-with-live-process-fallback
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        claude-dir (io/file root "claude/-tmp-w")]
+    (try
+      (.mkdirs claude-dir)
+      (spit (io/file claude-dir "claude-live.jsonl")
+            (str "{\"sessionId\":\"claude-live\","
+                 "\"cwd\":\"/tmp/w\","
+                 "\"timestamp\":\"" (iso-before 1000) "\","
+                 "\"type\":\"user\"}\n"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-pid-in-tree
+                    (fn [pid agent-type]
+                      (when (and (= "100" pid)
+                                 (= :claude-code agent-type))
+                        "200"))]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (is (= :running
+             (get-in (store/read-sessions state-dir)
+                     [:sessions "claude-live" :agent-status])))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-keeps-active-session-when-tmux-unavailable
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        claude-dir (io/file root "claude/-tmp-w")]
+    (try
+      (.mkdirs claude-dir)
+      (spit (io/file claude-dir "claude-no-tmux.jsonl")
+            (str "{\"sessionId\":\"claude-no-tmux\","
+                 "\"cwd\":\"/tmp/w\","
+                 "\"timestamp\":\"" (iso-before 1000) "\","
+                 "\"type\":\"user\"}\n"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info (fn [] nil)
+                    pane/find-agent-pid-in-tree
+                    (fn [_ _] (throw (ex-info "not called" {})))]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (is (= :running
+             (get-in (store/read-sessions state-dir)
+                     [:sessions "claude-no-tmux" :agent-status])))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-watch-path-does-not-apply-scan-liveness-check
+  (let [state-dir (temp-dir)
+        file-states (atom {})
+        file (io/file (temp-dir) "claude-live-event.jsonl")]
+    (try
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-pid-in-tree (fn [_ _] nil)]
+        (#'sessions/process-lines!
+         state-dir file-states file
+         [(str "{\"sessionId\":\"claude-event\","
+               "\"cwd\":\"/tmp/w\","
+               "\"timestamp\":\"" (iso-before 1000) "\","
+               "\"type\":\"user\"}")]))
+      (is (= :running
+             (get-in (store/read-sessions state-dir)
+                     [:sessions "claude-event" :agent-status])))
+      (finally
+        (cleanup-dir (.getParent file))
+        (cleanup-dir state-dir)))))
+
 (deftest test-scan-keeps-claude-assistant-last-message
   (let [root (temp-dir)
         state-dir (temp-dir)
@@ -164,7 +335,8 @@
                  "{\"sessionId\":\"claude-1\",\"cwd\":\"/tmp/w\","
                  "\"timestamp\":\"2026-01-01T00:00:01Z\","
                  "\"type\":\"user\"}\n"))
-      (with-redefs [sessions/resolve-pane-id (fn [_] nil)]
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info (fn [] nil)]
         (sessions/scan-recent-sessions!
          {:claude-root (.getPath (io/file root "claude"))
           :codex-root (.getPath (io/file root "codex"))
@@ -197,7 +369,8 @@
                  "{\"type\":\"tool_use\",\"id\":\"toolu_1\","
                  "\"name\":\"Bash\",\"input\":{\"command\":\"pwd\"}}"
                  "]}}\n"))
-      (with-redefs [sessions/resolve-pane-id (fn [_] nil)]
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info (fn [] nil)]
         (sessions/scan-recent-sessions!
          {:claude-root (.getPath (io/file root "claude"))
           :codex-root (.getPath (io/file root "codex"))

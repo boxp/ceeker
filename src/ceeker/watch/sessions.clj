@@ -180,17 +180,58 @@
         (session-time-ms existing))
     true))
 
-(defn- write-session! [state-dir session]
-  (when (seq (:session-id session))
-    (let [state (store/read-sessions state-dir)
-          session (cond-> session
-                    (nil? (:last-updated session))
-                    (assoc :last-updated (now-iso))
-                    (nil? (:pane-id session))
-                    (assoc :pane-id (resolve-pane-id session)))
-          key (or (:pane-id session) (:session-id session))]
-      (when (should-write? state session)
-        (store/update-session! state-dir key session)))))
+(def ^:private terminal-statuses
+  #{:closed :completed :error})
+
+(defn- expired-terminal-session? [session now-ms]
+  (and (contains? terminal-statuses (:agent-status session))
+       (> (- now-ms (session-time-ms session))
+          store/closed-ttl-ms)))
+
+(defn- live-agent-in-cwd-pane? [{:keys [cwd agent-type]} pane-infos]
+  (boolean
+   (some (fn [p]
+           (when (= cwd (:cwd p))
+             (pane/find-agent-pid-in-tree
+              (:pid p) agent-type)))
+         pane-infos)))
+
+(defn- should-write-scan-session? [session]
+  (cond
+    (expired-terminal-session?
+     session (System/currentTimeMillis))
+    false
+
+    (and (contains? store/capturable-statuses
+                    (:agent-status session))
+         (not (seq (:pane-id session))))
+    (let [pane-infos (pane/list-pane-info)]
+      (or (nil? pane-infos)
+          (live-agent-in-cwd-pane? session pane-infos)))
+
+    :else true))
+
+(defn- write-session!
+  ([state-dir session] (write-session! state-dir session {}))
+  ([state-dir session {:keys [scan?]}]
+   (when (seq (:session-id session))
+     (let [session (cond-> session
+                     (nil? (:last-updated session))
+                     (assoc :last-updated (now-iso)))]
+       (when (or (not scan?)
+                 (not (expired-terminal-session?
+                       session (System/currentTimeMillis))))
+         (let [session (cond-> session
+                         (nil? (:pane-id session))
+                         (assoc :pane-id (resolve-pane-id session)))]
+           (when (or (not scan?)
+                     (should-write-scan-session? session))
+             (let [state (store/read-sessions state-dir)
+                   key (or (:pane-id session)
+                           (:session-id session))]
+               (when (should-write? state session)
+                 (store/update-session!
+                  state-dir key session))))))))))
 
 (defn- merge-event [acc event]
   (let [last-message (if (contains? event :last-message)
@@ -214,21 +255,24 @@
   (and (.isFile file)
        (str/ends-with? (.getName file) ".jsonl")))
 
-(defn- process-lines! [state-dir file-states ^File file lines]
-  (let [agent-type (file-agent-type file)
-        path (.getAbsolutePath file)
-        current (get @file-states path {})
-        next-state (reduce
-                    (fn [acc line]
-                      (if-let [event (parse-jsonl-line
-                                      agent-type line)]
-                        (merge-event acc event)
-                        acc))
-                    current
-                    lines)]
-    (swap! file-states assoc path next-state)
-    (when (seq (:session-id next-state))
-      (write-session! state-dir next-state))))
+(defn- process-lines!
+  ([state-dir file-states ^File file lines]
+   (process-lines! state-dir file-states file lines {}))
+  ([state-dir file-states ^File file lines opts]
+   (let [agent-type (file-agent-type file)
+         path (.getAbsolutePath file)
+         current (get @file-states path {})
+         next-state (reduce
+                     (fn [acc line]
+                       (if-let [event (parse-jsonl-line
+                                       agent-type line)]
+                         (merge-event acc event)
+                         acc))
+                     current
+                     lines)]
+     (swap! file-states assoc path next-state)
+     (when (seq (:session-id next-state))
+       (write-session! state-dir next-state opts)))))
 
 (defn- recent-file? [cutoff-ms ^File file]
   (and (jsonl-file? file)
@@ -257,7 +301,8 @@
        (try
          (with-open [reader (io/reader file)]
            (process-lines! state-dir file-states file
-                           (doall (line-seq reader))))
+                           (doall (line-seq reader))
+                           {:scan? true}))
          (catch Exception e
            (binding [*out* *err*]
              (println "Skipping unreadable session file"
