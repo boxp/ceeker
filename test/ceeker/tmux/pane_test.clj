@@ -444,6 +444,32 @@
                         :found))]
         (is (false? (stale? session pane-cwds pane-infos)))))))
 
+(deftest test-stale-empty-cwd-without-pane-id
+  (testing "Empty cwd metadata-only active session without pane-id is stale"
+    (let [stale? #'ceeker.tmux.pane/stale-session?
+          session {:agent-type :claude-code
+                   :agent-status :running
+                   :cwd ""
+                   :pane-id nil}
+          pane-infos [{:pane-id "%5"
+                       :pid "12345"
+                       :cwd "/tmp/work"}]
+          pane-cwds #{"/tmp/work"}]
+      (is (true? (stale? session pane-cwds pane-infos))))))
+
+(deftest test-stale-empty-cwd-with-pane-id-is-not-ghost
+  (testing "Empty cwd session with pane-id is not treated as metadata-only ghost"
+    (let [stale? #'ceeker.tmux.pane/stale-session?
+          session {:agent-type :claude-code
+                   :agent-status :running
+                   :cwd ""
+                   :pane-id "%5"}
+          pane-infos [{:pane-id "%5"
+                       :pid "12345"
+                       :cwd "/tmp/work"}]
+          pane-cwds #{"/tmp/work"}]
+      (is (false? (stale? session pane-cwds pane-infos))))))
+
 ;; --- Closed session with dead agent not reactivated ---
 
 (deftest test-closed-session-dead-agent-not-reactivated

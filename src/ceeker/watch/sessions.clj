@@ -234,7 +234,8 @@
 (defn- write-session!
   ([state-dir session] (write-session! state-dir session {}))
   ([state-dir session {:keys [scan?]}]
-   (when (seq (:session-id session))
+   (when (and (seq (:session-id session))
+              (seq (:cwd session)))
      (let [session (cond-> session
                      (nil? (:last-updated session))
                      (assoc :last-updated (now-iso)))]
