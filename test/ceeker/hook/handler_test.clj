@@ -1,6 +1,7 @@
 (ns ceeker.hook.handler-test
   (:require [ceeker.hook.handler :as handler]
             [ceeker.state.store :as store]
+            [ceeker.tmux.pane :as pane]
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]))
@@ -312,6 +313,29 @@
                    (:agent-type session))))))
       (finally
         (cleanup-dir dir)))))
+
+(deftest test-handle-hook-does-not-close-stale-sessions
+  (testing "hook path only parses, normalizes, and writes state"
+    (let [dir (temp-dir)]
+      (try
+        (with-redefs [handler/current-pane-id
+                      (constantly "%10")
+                      pane/close-stale-sessions!
+                      (fn [_]
+                        (throw
+                         (ex-info "should not run in hook path" {})))]
+          (let [payload (json/generate-string
+                         {:session_id "fast-hook-1"
+                          :cwd "/tmp/work"
+                          :hook_event_name "Notification"
+                          :message "Working"})
+                result (handler/handle-hook!
+                        dir "claude" nil payload)
+                stored (store/read-sessions dir)]
+            (is (= "fast-hook-1" (:session-id result)))
+            (is (some? (get-in stored [:sessions "%10"])))))
+        (finally
+          (cleanup-dir dir))))))
 
 ;; --- Codex tests ---
 

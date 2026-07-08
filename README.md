@@ -248,11 +248,23 @@ Claude Code passes a JSON payload to command hooks via stdin. The payload contai
 
 Note: `InstructionsLoaded` is an event that is already asynchronous by design on the Claude Code side.
 
-### Codex (hooks — recommended, v0.114.0+)
+### Codex (notify — recommended)
+
+Use Codex's `notify` mechanism. Add the following to `~/.codex/config.toml`:
+
+```toml
+notify = ["ceeker", "hook", "codex"]
+```
+
+Codex appends the JSON payload as the last argument of the `notify` command (via argv, not stdin).
+
+### Codex (hooks — not recommended, v0.114.0+)
 
 Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) supports `SessionStart` and `Stop` events via its **experimental** hooks engine.
 
-> **Note:** The `codex_hooks` feature is currently **experimental** and its API may change in future releases.
+> **Not recommended:** As of Codex v0.142.5, the hooks engine does not support async execution. Even when `"async": true` is set in `hooks.json`, all hooks run synchronously and can significantly reduce Codex responsiveness. Use `notify` above for now. Reconsider hooks after Codex adds async hooks support.
+>
+> The `codex_hooks` feature is currently **experimental** and its API may change in future releases.
 
 #### 1. Enable the feature flag
 
@@ -282,7 +294,7 @@ codex_hooks = true
           {
             "type": "command",
             "command": "ceeker hook codex SessionStart",
-            "async": false
+            "async": true
           }
         ]
       }
@@ -293,7 +305,7 @@ codex_hooks = true
           {
             "type": "command",
             "command": "ceeker hook codex Stop",
-            "async": false
+            "async": true
           }
         ]
       }
@@ -304,27 +316,15 @@ codex_hooks = true
 
 Codex hooks pass a JSON payload via stdin (same as Claude Code). The payload contains `session_id`, `cwd`, `hook_event_name`, `model`, `permission_mode`, and `transcript_path`. For `SessionStart`, `source` indicates whether the session was started fresh (`"startup"`) or resumed (`"resume"`). For `Stop`, ceeker also captures `last_assistant_message`.
 
-> **Temporary workaround — `async: false` required:** Ideally hooks should run asynchronously (`"async": true`) to avoid blocking the agent loop. However, as of Codex v0.114.0, async hooks are **not yet supported** — setting `"async": true` causes the hook to be skipped with the warning `⚠ skipping async hook ... async hooks are not supported yet`. As a temporary measure, use `"async": false`; ceeker's hook handler is lightweight and will not noticeably block the agent loop. **When Codex adds async hook support in a future release, you can switch back to `"async": true`.**
-
-> **Migrating from notify:** If you were previously using the `notify` mechanism in `config.toml`, remove the `notify = ["ceeker", "hook", "codex"]` line after setting up `hooks.json` to avoid receiving duplicate events.
+Because async hooks are not currently supported by Codex, this setup is not recommended for day-to-day use. If both `hooks.json` and `notify` are active, ceeker will receive duplicate events.
 
 #### Troubleshooting — Codex hooks
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | No session appears in ceeker after starting Codex | Feature flag `codex_hooks` is not enabled | Run `codex features enable codex_hooks` or add `[features] codex_hooks = true` to `~/.codex/config.toml` |
-| `⚠ skipping async hook ... async hooks are not supported yet` | `"async": true` is set in `hooks.json` (async hooks are not yet supported) | Change to `"async": false` as a temporary workaround |
+| Codex becomes noticeably less responsive | Codex currently runs hooks synchronously even when `"async": true` is set | Use `notify` instead of hooks until Codex supports async hooks |
 | Duplicate session events | Both `hooks.json` and `notify` in `config.toml` are active | Remove the `notify` line from `config.toml` |
-
-### Codex (notify — fallback)
-
-If you are on a Codex version before v0.114.0, use the notify mechanism instead. Add the following to `~/.codex/config.toml`:
-
-```toml
-notify = ["ceeker", "hook", "codex"]
-```
-
-Codex appends the JSON payload as the last argument of the `notify` command (via argv, not stdin).
 
 ## Automatic Session Cleanup
 
