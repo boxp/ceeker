@@ -4,15 +4,15 @@
 
 tmuxペインを横断してAIコーディングエージェントのセッション・進捗をモニタリングするTUI。
 
-複数のAIコーディングエージェント（Claude Code / Codex）が並行動作する環境で、各セッションの状態を一覧表示し、tmuxペインへのジャンプを可能にする。
+複数のAIコーディングエージェント（Claude Code / Codex / pi）が並行動作する環境で、各セッションの状態を一覧表示し、tmuxペインへのジャンプを可能にする。
 
 ![ceeker screenshot](./assets/ceeker-screenshot.png)
 
 ## なぜ ceeker？
 
 - **Windows（WSL）、Linux、macOS で動作**
-- **Claude Code と Codex の両方に対応**
-- **`Enter` キーひとつで対象の Claude Code / Codex ペインにジャンプ**
+- **Claude Code、Codex、pi に対応**
+- **`Enter` キーひとつで対象の Claude Code / Codex / pi ペインにジャンプ**
 - **複数エージェントセッションをまとめて監視**
 
 ## 前提条件
@@ -92,7 +92,7 @@ ceeker
 **機能:**
 
 - **自動反映**: `sessions.edn` のファイル変更を inotify（Linux）/ WatchService で検知し、TUIを自動更新
-- **session履歴ファイルwatcher**: hookなしでも Claude Code / Codex の JSONL 履歴ファイルからセッションを自動検知
+- **session履歴ファイルwatcher**: hookなしでも Claude Code / Codex / pi の JSONL 履歴ファイルからセッションを自動検知
 - **セッション絞り込み**: エージェント種別・ステータス・テキスト検索で表示を絞り込み
 
 **キーバインド:**
@@ -104,7 +104,7 @@ ceeker
 | `Enter` | 選択セッションのtmuxペインへジャンプ |
 | `r` | 手動リフレッシュ |
 | `v` | 表示切替 (Auto→Table→Card) |
-| `a` | エージェント種別フィルタ切替（全て → Claude → Codex → 全て） |
+| `a` | エージェント種別フィルタ切替（全て → Claude → Codex → Pi → 全て） |
 | `s` | ステータスフィルタ切替（全て → running → completed → error → waiting → idle → 全て） |
 | `/` | テキスト検索（session-id / cwd 部分一致） |
 | `c` | フィルタ全クリア |
@@ -158,20 +158,21 @@ ceeker --view card
 tmux 内のどこからでもポップアップで ceeker を開けます。`--exit-on-jump` と組み合わせると、ペイン選択後にポップアップが自動で閉じます。
 
 ```tmux
-# prefix + C-k で Claude Code / Codex の状態をポップアップ表示
+# prefix + C-k で Claude Code / Codex / pi の状態をポップアップ表示
 bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker --exit-on-jump"
 ```
 
 ## セットアップ
 
-ceeker は Claude Code / Codex の session 履歴 JSONL ファイルを監視して、セッションを自動検知します:
+ceeker は Claude Code / Codex / pi の session 履歴 JSONL ファイルを監視して、セッションを自動検知します:
 
 - Claude Code: `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`
 - Codex: `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`
+- pi: `~/.pi/agent/sessions/<cwd-slug>/<timestamp>_<uuid>.jsonl`
 
-このため、hook 設定なしでも ceeker にセッションが表示されます。Codex は session ファイルだけで追跡できるため、`notify` 設定は任意です。
+このため、hook 設定なしでも ceeker にセッションが表示されます。Codex と pi は session ファイルだけで追跡できるため、Codex の `notify` 設定は任意で、pi 側に ceeker 専用設定は不要です。
 
-hook は、より細かいイベントタイミングや最終メッセージを取り込みたい場合に有用です。特に Claude Code の明示的な hook イベントや Codex notify 更新を併用できます。
+hook は、より細かいイベントタイミングや最終メッセージを取り込みたい場合に有用です。特に Claude Code の明示的な hook イベントや Codex notify 更新を併用できます。将来の pi extension 連携向けに `ceeker hook pi <event>` も受け付けますが、pi の自動検知には不要です。
 
 ### Claude Code
 
@@ -349,7 +350,7 @@ tmuxペインが終了すると、対応するセッションは自動的に `Cl
 `tmux list-panes -a` を1回実行して全ペインのcwdとPIDを取得し、`running` 状態のセッションと照合します。以下の条件でセッションは `closed` に遷移します:
 
 1. **ペイン不在**: セッションのcwdに一致するtmuxペインが存在しない
-2. **プロセスツリー探索**: cwdが一致するペインが存在しても、そのペインのプロセスツリー内に対象エージェント（claude/codex）のプロセスが見つからない場合
+2. **プロセスツリー探索**: cwdが一致するペインが存在しても、そのペインのプロセスツリー内に対象エージェント（claude/codex/pi）のプロセスが見つからない場合
 
 tmuxが利用できない場合はチェックをスキップします。
 
@@ -449,7 +450,7 @@ native-image でビルドしたバイナリに対して E2E テストを実行�
 
 テスト内容:
 - `--help` 出力確認
-- hook コマンド (Claude / Codex) のセッション記録
+- hook コマンド (Claude / Codex / pi) のセッション記録
 - TUI 起動・終了 (`q` キー)
 - TUI 検索モード (`/` → `Esc` → `q`)
 

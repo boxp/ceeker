@@ -4,15 +4,15 @@
 
 A TUI for monitoring AI coding agent sessions and progress across tmux panes.
 
-In environments where multiple AI coding agents (Claude Code / Codex) run in parallel, ceeker provides a unified view of all sessions with the ability to jump to individual tmux panes.
+In environments where multiple AI coding agents (Claude Code / Codex / pi) run in parallel, ceeker provides a unified view of all sessions with the ability to jump to individual tmux panes.
 
 ![ceeker screenshot](./assets/ceeker-screenshot.png)
 
 ## Why ceeker?
 
 - **Works on Windows (WSL), Linux, and macOS**
-- **Supports both Claude Code and Codex**
-- **Jump to the target Claude Code / Codex pane just by pressing `Enter`**
+- **Supports Claude Code, Codex, and pi**
+- **Jump to the target Claude Code / Codex / pi pane just by pressing `Enter`**
 - **Monitor multiple agent sessions in one place**
 
 ## Prerequisites
@@ -92,7 +92,7 @@ Displays a list of all active sessions.
 **Features:**
 
 - **Auto-refresh**: Detects file changes to `sessions.edn` via inotify (Linux) / WatchService and automatically updates the TUI
-- **Session file watcher**: Detects Claude Code / Codex sessions from history JSONL files even without hooks
+- **Session file watcher**: Detects Claude Code / Codex / pi sessions from history JSONL files even without hooks
 - **Session filtering**: Filter the display by agent type, status, or text search
 
 **Key bindings:**
@@ -104,7 +104,7 @@ Displays a list of all active sessions.
 | `Enter` | Jump to the selected session's tmux pane |
 | `r` | Manual refresh |
 | `v` | Toggle view mode (Auto → Table → Card) |
-| `a` | Toggle agent type filter (All → Claude → Codex → All) |
+| `a` | Toggle agent type filter (All → Claude → Codex → Pi → All) |
 | `s` | Toggle status filter (All → running → completed → error → waiting → idle → All) |
 | `/` | Text search (partial match on session-id / cwd) |
 | `c` | Clear all filters |
@@ -158,20 +158,21 @@ ceeker --view card
 You can open ceeker as a popup from anywhere inside tmux. Combine with `--exit-on-jump` so the popup closes automatically after you select a pane.
 
 ```tmux
-# Show a popup with all Claude Code / Codex states via prefix + C-k
+# Show a popup with all Claude Code / Codex / pi states via prefix + C-k
 bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker --exit-on-jump"
 ```
 
 ## Setup
 
-ceeker automatically detects Claude Code and Codex sessions by watching their session history JSONL files:
+ceeker automatically detects Claude Code, Codex, and pi sessions by watching their session history JSONL files:
 
 - Claude Code: `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`
 - Codex: `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`
+- pi: `~/.pi/agent/sessions/<cwd-slug>/<timestamp>_<uuid>.jsonl`
 
-This means sessions can appear in ceeker without hook configuration. Codex sessions are tracked from the session file alone, so `notify` is optional.
+This means sessions can appear in ceeker without hook configuration. Codex and pi sessions are tracked from the session file alone, so Codex `notify` is optional and pi does not need ceeker-specific setup.
 
-Hooks are still useful for richer event timing and final messages, especially if you want explicit Claude Code hook events or Codex notify updates.
+Hooks are still useful for richer event timing and final messages, especially if you want explicit Claude Code hook events or Codex notify updates. `ceeker hook pi <event>` is accepted for future pi extension integrations, but it is not required for automatic pi discovery.
 
 ### Claude Code
 
@@ -349,7 +350,7 @@ When a tmux pane is closed, the corresponding session automatically transitions 
 A single `tmux list-panes -a` call retrieves the cwd and PID of all panes, which are then matched against sessions in the `running` state. A session transitions to `closed` under the following conditions:
 
 1. **Pane not found**: No tmux pane exists matching the session's cwd
-2. **Process tree search**: Even if a pane with a matching cwd exists, the target agent (claude/codex) process is not found in the pane's process tree
+2. **Process tree search**: Even if a pane with a matching cwd exists, the target agent (claude/codex/pi) process is not found in the pane's process tree
 
 Checks are skipped when tmux is not available.
 
@@ -449,7 +450,7 @@ Runs E2E tests against a binary built with native-image to catch native-image-sp
 
 Test cases:
 - `--help` output verification
-- Hook commands (Claude / Codex) session recording
+- Hook commands (Claude / Codex / pi) session recording
 - TUI startup and exit (`q` key)
 - TUI search mode (`/` → `Esc` → `q`)
 

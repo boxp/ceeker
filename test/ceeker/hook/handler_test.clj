@@ -359,6 +359,17 @@
     (is (= :codex (:agent-type result)))
     (is (= :completed (:agent-status result)))))
 
+(deftest test-normalize-pi-notification
+  (let [result (handler/normalize-event
+                "pi" "Notification"
+                {:session_id "pi-1"
+                 :cwd "/tmp/pi"
+                 :message "Pi is working"})]
+    (is (= "pi-1" (:session-id result)))
+    (is (= :pi (:agent-type result)))
+    (is (= :running (:agent-status result)))
+    (is (= "Pi is working" (:last-message result)))))
+
 (deftest test-normalize-unknown-agent
   (is (thrown? clojure.lang.ExceptionInfo
                (handler/normalize-event

@@ -10,7 +10,7 @@
 
 (def ^:private agent-cycle
   "Cycle order for agent filter toggle."
-  [nil :claude-code :codex])
+  [nil :claude-code :codex :pi])
 
 (def ^:private status-cycle
   "Cycle order for status filter toggle."

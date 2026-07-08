@@ -1,5 +1,5 @@
 (ns ceeker.watch.sessions
-  "Session history file watcher for Claude Code and Codex JSONL files."
+  "Session history file watcher for Claude Code, Codex, and pi JSONL files."
   (:require [ceeker.state.store :as store]
             [ceeker.tmux.pane :as pane]
             [cheshire.core :as json]
@@ -21,6 +21,9 @@
 
 (defn default-codex-root []
   (str (System/getProperty "user.home") "/.codex/sessions"))
+
+(defn default-pi-root []
+  (str (System/getProperty "user.home") "/.pi/agent/sessions"))
 
 (defn- now-iso []
   (.toString (java.time.Instant/now)))
@@ -96,6 +99,28 @@
       "event_msg" (parse-codex-event timestamp payload)
       nil)))
 
+(defn- parse-pi [m]
+  (let [timestamp (:timestamp m)]
+    (case (:type m)
+      "session"
+      (cond-> {:agent-type :pi
+               :agent-status :running}
+        (:id m) (assoc :session-id (:id m))
+        (:cwd m) (assoc :cwd (:cwd m))
+        timestamp (assoc :last-updated timestamp))
+
+      "message"
+      (let [message (:message m)
+            content (assistant-content message)]
+        (when (= "assistant" (:role message))
+          (cond-> {:agent-type :pi
+                   :agent-status :running}
+            timestamp (assoc :last-updated timestamp)
+            (not (str/blank? content))
+            (assoc :last-message content))))
+
+      nil)))
+
 (defn parse-jsonl-line
   "Parses a single session JSONL line for agent-type."
   [agent-type line]
@@ -103,6 +128,7 @@
     (case agent-type
       :claude-code (parse-claude m)
       :codex (parse-codex m)
+      :pi (parse-pi m)
       nil)))
 
 (defn- safe-line [line]
@@ -242,6 +268,7 @@
     (cond
       (str/includes? path ".claude") :claude-code
       (str/includes? path ".codex") :codex
+      (str/includes? path ".pi") :pi
       (str/starts-with? (.getName file) "rollout-") :codex
       :else :claude-code)))
 
@@ -253,7 +280,8 @@
   ([state-dir file-states ^File file lines]
    (process-lines! state-dir file-states file lines {}))
   ([state-dir file-states ^File file lines opts]
-   (let [agent-type (file-agent-type file)
+   (let [agent-type (or (:agent-type opts)
+                        (file-agent-type file))
          path (.getAbsolutePath file)
          current (get @file-states path {})
          next-state (reduce
@@ -279,29 +307,43 @@
               (file-seq dir))
       [])))
 
+(defn- agent-session-files [agent-type root cutoff-ms]
+  (map (fn [file] [agent-type file])
+       (session-files root cutoff-ms)))
+
+(defn- scan-session-file! [state-dir file-states agent-type file]
+  (try
+    (with-open [reader (io/reader file)]
+      (process-lines! state-dir file-states file
+                      (doall (line-seq reader))
+                      {:scan? true
+                       :agent-type agent-type}))
+    (catch Exception e
+      (binding [*out* *err*]
+        (println "Skipping unreadable session file"
+                 (.getPath ^File file)
+                 (str "(" (.getMessage e) ")"))))))
+
 (defn scan-recent-sessions!
   "Synchronously scans recent JSONL session files into state store."
   ([] (scan-recent-sessions! {}))
-  ([{:keys [claude-root codex-root state-dir since-hours]
+  ([{:keys [claude-root codex-root pi-root state-dir since-hours]
      :or {since-hours default-since-hours}}]
    (let [state-dir (or state-dir (store/state-dir))
          claude-root (or claude-root (default-claude-root))
          codex-root (or codex-root (default-codex-root))
+         pi-root (or pi-root (default-pi-root))
          cutoff-ms (- (System/currentTimeMillis)
                       (* since-hours 60 60 1000))
          file-states (atom {})]
-     (doseq [file (concat (session-files claude-root cutoff-ms)
-                          (session-files codex-root cutoff-ms))]
-       (try
-         (with-open [reader (io/reader file)]
-           (process-lines! state-dir file-states file
-                           (doall (line-seq reader))
-                           {:scan? true}))
-         (catch Exception e
-           (binding [*out* *err*]
-             (println "Skipping unreadable session file"
-                      (.getPath ^File file)
-                      (str "(" (.getMessage e) ")")))))))))
+     (doseq [[agent-type file]
+             (concat
+              (agent-session-files
+               :claude-code claude-root cutoff-ms)
+              (agent-session-files :codex codex-root cutoff-ms)
+              (agent-session-files :pi pi-root cutoff-ms))]
+       (scan-session-file!
+        state-dir file-states agent-type file)))))
 
 (defn- close-watch-service! [^WatchService ws]
   (when ws (.close ws)))
@@ -341,11 +383,12 @@
       (process-lines! state-dir file-states file
                       (tail-new-lines! offsets file)))))
 
-(defn- watch-context [claude-root codex-root]
+(defn- watch-context [claude-root codex-root pi-root]
   (let [ws (.newWatchService (FileSystems/getDefault))
         key->dir (atom {})]
     (register-recursive! ws key->dir claude-root)
     (register-recursive! ws key->dir codex-root)
+    (register-recursive! ws key->dir pi-root)
     {:watch-service ws
      :key->dir key->dir
      :offsets (atom {})
@@ -364,12 +407,13 @@
 
 (defn run-watch-loop!
   "Runs the blocking WatchService loop until stop-ch is closed."
-  [stop-ch {:keys [claude-root codex-root state-dir]
+  [stop-ch {:keys [claude-root codex-root pi-root state-dir]
             :or {state-dir nil}}]
   (let [state-dir (or state-dir (store/state-dir))
         claude-root (or claude-root (default-claude-root))
         codex-root (or codex-root (default-codex-root))
-        ctx (watch-context claude-root codex-root)]
+        pi-root (or pi-root (default-pi-root))
+        ctx (watch-context claude-root codex-root pi-root)]
     (try
       (loop []
         (let [[_ ch] (async/alts!!

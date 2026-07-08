@@ -53,6 +53,7 @@
   (case agent-type
     :claude-code (str ansi-cyan "[Claude]" ansi-reset)
     :codex (str ansi-blue "[Codex]" ansi-reset)
+    :pi (str ansi-magenta "[Pi]" ansi-reset)
     (str ansi-dim "[???]" ansi-reset)))
 
 (defn- char-display-width

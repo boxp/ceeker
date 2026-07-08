@@ -114,6 +114,39 @@
   (testing "Empty lines -> nil"
     (is (nil? (capture/detect-codex-state ["" ""])))))
 
+;; --- Pi state detection ---
+
+(deftest test-pi-working-indicator-running
+  (testing "pi working indicator line -> running"
+    (let [lines ["previous output"
+                 "● Working"
+                 ""]
+          result (capture/detect-pi-state lines)]
+      (is (= :running (:status result)))
+      (is (nil? (:waiting-reason result))))))
+
+(deftest test-pi-queue-or-abort-hint-running
+  (testing "pi queue/abort hint while agent is working -> running"
+    (let [lines ["Enter queues a steering message"
+                 "Escape aborts and restores queued messages"]
+          result (capture/detect-pi-state lines)]
+      (is (= :running (:status result))))))
+
+(deftest test-pi-dialog-waiting
+  (testing "pi extension dialog fallback -> waiting"
+    (let [lines ["Pick an option"
+                 "Enter to select"]
+          result (capture/detect-pi-state lines)]
+      (is (= :waiting (:status result)))
+      (is (= "respond" (:waiting-reason result))))))
+
+(deftest test-pi-shell-prompt-idle
+  (testing "generic prompt fallback -> idle"
+    (let [lines ["done"
+                 "user@host:~/project$ "]
+          result (capture/detect-pi-state lines)]
+      (is (= :idle (:status result))))))
+
 ;; --- detect-agent-state dispatch ---
 
 (deftest test-detect-agent-state-nil-pane

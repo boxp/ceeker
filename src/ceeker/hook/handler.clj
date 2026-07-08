@@ -1,5 +1,5 @@
 (ns ceeker.hook.handler
-  "Hook event handler for Claude Code and Codex.
+  "Hook event handler for Claude Code, Codex, and pi.
    Normalizes hook payloads and writes to State Store.
    Uses pane-id as store key when available, falling back
    to session-id for non-tmux sessions."
@@ -84,6 +84,23 @@
     (make-session (:session-id id) :claude-code
                   status (:cwd id) message)))
 
+(defn- extract-pi-identity
+  "Extracts session-id and cwd from a future pi hook payload."
+  [payload]
+  {:session-id (or (:session_id payload)
+                   (:id payload)
+                   (str (java.util.UUID/randomUUID)))
+   :cwd (or (:cwd payload) "")})
+
+(defn- normalize-pi-event
+  "Normalizes a pi hook event into session state."
+  [event-type payload]
+  (let [id (extract-pi-identity payload)
+        [status message] (claude-event-fields
+                          event-type payload)]
+    (make-session (:session-id id) :pi
+                  status (:cwd id) message)))
+
 (defn- extract-codex-identity
   "Extracts session-id and cwd from Codex payload.
    Supports snake_case (hooks v0.114.0+) and kebab-case (notify)."
@@ -131,6 +148,7 @@
   (case agent-type
     "claude" (normalize-claude-event event-type payload)
     "codex" (normalize-codex-event event-type payload)
+    "pi" (normalize-pi-event event-type payload)
     (throw (ex-info (str "Unknown agent type: " agent-type)
                     {:agent-type agent-type}))))
 

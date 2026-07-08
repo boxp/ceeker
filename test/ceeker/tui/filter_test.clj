@@ -22,13 +22,18 @@
     :agent-status :running
     :cwd "/home/user/project-d"
     :pane-id "%4"
-    :last-message "Active"}])
+    :last-message "Active"}
+   {:agent-type :pi
+    :agent-status :running
+    :cwd "/home/user/project-e"
+    :pane-id "%5"
+    :last-message "Pi active"}])
 
 (deftest test-empty-filter
   (testing "empty filter passes all sessions"
     (let [result (f/apply-filters f/empty-filter
                                   sample-sessions)]
-      (is (= 4 (count result))))))
+      (is (= 5 (count result))))))
 
 (deftest test-agent-filter
   (testing "filter by claude-code"
@@ -45,6 +50,14 @@
           result (f/apply-filters fs sample-sessions)]
       (is (= 2 (count result)))
       (is (every? #(= :codex (:agent-type %))
+                  result))))
+
+  (testing "filter by pi"
+    (let [fs (assoc f/empty-filter
+                    :agent-filter :pi)
+          result (f/apply-filters fs sample-sessions)]
+      (is (= 1 (count result)))
+      (is (every? #(= :pi (:agent-type %))
                   result)))))
 
 (deftest test-status-filter
@@ -52,7 +65,7 @@
     (let [fs (assoc f/empty-filter
                     :status-filter :running)
           result (f/apply-filters fs sample-sessions)]
-      (is (= 2 (count result)))
+      (is (= 3 (count result)))
       (is (every? #(= :running (:agent-status %))
                   result))))
 
@@ -105,11 +118,13 @@
     (let [f0 f/empty-filter
           f1 (f/toggle-agent-filter f0)
           f2 (f/toggle-agent-filter f1)
-          f3 (f/toggle-agent-filter f2)]
+          f3 (f/toggle-agent-filter f2)
+          f4 (f/toggle-agent-filter f3)]
       (is (nil? (:agent-filter f0)))
       (is (= :claude-code (:agent-filter f1)))
       (is (= :codex (:agent-filter f2)))
-      (is (nil? (:agent-filter f3)))))
+      (is (= :pi (:agent-filter f3)))
+      (is (nil? (:agent-filter f4)))))
 
   (testing "unknown agent filter falls back to first cycle item"
     (let [f0 (assoc f/empty-filter :agent-filter :unknown)
@@ -189,12 +204,14 @@
           f1 (f/toggle-agent-filter f0)
           f2 (f/toggle-agent-filter f1)
           f3 (f/toggle-agent-filter f2)
-          f4 (f/toggle-agent-filter f3)]
+          f4 (f/toggle-agent-filter f3)
+          f5 (f/toggle-agent-filter f4)]
       (is (nil? (:agent-filter f0)))
       (is (= :claude-code (:agent-filter f1)))
       (is (= :codex (:agent-filter f2)))
-      (is (nil? (:agent-filter f3)))
-      (is (= :claude-code (:agent-filter f4))))))
+      (is (= :pi (:agent-filter f3)))
+      (is (nil? (:agent-filter f4)))
+      (is (= :claude-code (:agent-filter f5))))))
 
 (deftest test-toggle-status-filter-full-cycle
   (testing "full status cycle does not throw on PersistentVector"

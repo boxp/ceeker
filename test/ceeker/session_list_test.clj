@@ -77,3 +77,16 @@
              :pane-id nil
              :last-message nil
              :last-updated "2026-04-02T00:00:00Z"})))))
+
+(deftest session->external-stringifies-pi-agent-type
+  (testing "pi agent type is exposed as pi"
+    (is (= "pi"
+           (:agent_type
+            (session-list/session->external
+             {:session-id "pi-1"
+              :agent-type :pi
+              :agent-status :running
+              :cwd "/tmp/pi"
+              :pane-id "%5"
+              :last-message "working"
+              :last-updated "2026-04-02T00:00:00Z"}))))))

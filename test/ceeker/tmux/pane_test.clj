@@ -321,6 +321,36 @@
       (is (= "11" (pane/find-agent-pid-in-tree
                    "10" :codex))))))
 
+(deftest test-agent-pattern-pi-matches-cli-token-only
+  (testing "pi matches the pi command path or argv token"
+    (let [pat (#'ceeker.tmux.pane/agent-pattern :pi)]
+      (is (re-find pat "node /home/user/.nodebrew/bin/pi"))
+      (is (re-find pat "node /usr/local/bin/pi --continue"))
+      (is (re-find pat "pi"))))
+  (testing "pi does not match pip, pipe, Claude, or Codex"
+    (let [pat (#'ceeker.tmux.pane/agent-pattern :pi)]
+      (is (nil? (re-find pat "python -m pip install x")))
+      (is (nil? (re-find pat "/usr/bin/pipewire")))
+      (is (nil? (re-find pat "/usr/bin/claude")))
+      (is (nil? (re-find pat "/usr/bin/codex"))))))
+
+(deftest test-find-agent-in-tree-pi-process
+  (testing "process-tree liveness finds a pi process"
+    (with-redefs [ceeker.tmux.pane/read-proc-cmdline
+                  (fn [pid]
+                    (case (str pid)
+                      "10" "zsh"
+                      "11" "node /home/user/.nodebrew/current/bin/pi"
+                      nil))
+                  ceeker.tmux.pane/child-pids
+                  (fn [pid]
+                    (case (str pid)
+                      "10" ["11"]
+                      []))
+                  ceeker.tmux.pane/process-alive?
+                  (fn [_] true)]
+      (is (= :found (pane/find-agent-in-tree "10" :pi))))))
+
 (deftest test-child-pids-falls-back-to-pgrep-when-proc-read-fails
   (testing "uses pgrep fallback when /proc children exists but slurp fails"
     (let [calls (atom [])]
@@ -395,6 +425,23 @@
           pane-cwds #{"/tmp/work"}]
       (with-redefs [pane/find-agent-in-tree
                     (fn [_ _] :unknown)]
+        (is (false? (stale? session pane-cwds pane-infos)))))))
+
+(deftest test-stale-pane-id-less-pi-cwd-match-live-agent
+  (testing "Pane-id-less pi session remains active when pi process is live"
+    (let [stale? #'ceeker.tmux.pane/stale-session?
+          session {:agent-type :pi
+                   :agent-status :running
+                   :cwd "/tmp/work"
+                   :pane-id ""}
+          pane-infos [{:pane-id "%5"
+                       :pid "12345"
+                       :cwd "/tmp/work"}]
+          pane-cwds #{"/tmp/work"}]
+      (with-redefs [pane/find-agent-in-tree
+                    (fn [_ agent-type]
+                      (when (= :pi agent-type)
+                        :found))]
         (is (false? (stale? session pane-cwds pane-infos)))))))
 
 ;; --- Closed session with dead agent not reactivated ---

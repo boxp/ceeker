@@ -83,6 +83,34 @@
             :last-updated "2026-01-01T00:00:02Z"}
            (sessions/parse-jsonl-line :codex complete-line)))))
 
+(deftest test-parse-pi-session-line
+  (let [line (str "{\"type\":\"session\",\"version\":3,"
+                  "\"id\":\"pi-1\","
+                  "\"timestamp\":\"2026-01-01T00:00:00Z\","
+                  "\"cwd\":\"/tmp/pi-work\"}")
+        result (sessions/parse-jsonl-line :pi line)]
+    (is (= {:session-id "pi-1"
+            :agent-type :pi
+            :agent-status :running
+            :cwd "/tmp/pi-work"
+            :last-updated "2026-01-01T00:00:00Z"}
+           result))))
+
+(deftest test-parse-pi-assistant-message-line
+  (let [line (str "{\"type\":\"message\","
+                  "\"timestamp\":\"2026-01-01T00:00:01Z\","
+                  "\"message\":{\"role\":\"assistant\","
+                  "\"content\":["
+                  "{\"type\":\"thinking\",\"thinking\":\"hidden\"},"
+                  "{\"type\":\"text\",\"text\":\"hello\"},"
+                  "{\"type\":\"text\",\"text\":\"world\"}]}}")
+        result (sessions/parse-jsonl-line :pi line)]
+    (is (= {:agent-type :pi
+            :agent-status :running
+            :last-message "hello\nworld"
+            :last-updated "2026-01-01T00:00:01Z"}
+           result))))
+
 (deftest test-tail-new-lines-uses-offset
   (let [dir (temp-dir)
         file (io/file dir "session.jsonl")
@@ -130,10 +158,12 @@
         state-dir (temp-dir)
         codex-dir (io/file root "codex/2026/01/01")
         claude-dir (io/file root "claude/-tmp-w")
+        pi-dir (io/file root "pi/--tmp-w--")
         recent-ts (iso-before 1000)]
     (try
       (.mkdirs codex-dir)
       (.mkdirs claude-dir)
+      (.mkdirs pi-dir)
       (spit (io/file codex-dir "rollout-2026-01-01T00-00-00Z-u.jsonl")
             (str "{\"timestamp\":\"" recent-ts "\","
                  "\"type\":\"session_meta\","
@@ -147,11 +177,22 @@
             (str "{\"sessionId\":\"claude-1\",\"cwd\":\"/tmp/w\","
                  "\"timestamp\":\"" recent-ts "\","
                  "\"type\":\"user\"}\n"))
+      (spit (io/file pi-dir "2026-01-01T00-00-00-000Z_pi.jsonl")
+            (str "{\"type\":\"session\",\"version\":3,"
+                 "\"id\":\"pi-1\","
+                 "\"timestamp\":\"" recent-ts "\","
+                 "\"cwd\":\"/tmp/w\"}\n"
+                 "{\"type\":\"message\","
+                 "\"timestamp\":\"" recent-ts "\","
+                 "\"message\":{\"role\":\"assistant\","
+                 "\"content\":[{\"type\":\"text\","
+                 "\"text\":\"pi reply\"}]}}\n"))
       (with-redefs [sessions/resolve-pane-id (fn [_] nil)
                     pane/list-pane-info (fn [] nil)]
         (sessions/scan-recent-sessions!
          {:claude-root (.getPath (io/file root "claude"))
           :codex-root (.getPath (io/file root "codex"))
+          :pi-root (.getPath (io/file root "pi"))
           :state-dir state-dir
           :since-hours 24}))
       (let [sessions-map (:sessions (store/read-sessions state-dir))]
@@ -160,7 +201,11 @@
         (is (= "done"
                (get-in sessions-map ["codex-1" :last-message])))
         (is (= :running
-               (get-in sessions-map ["claude-1" :agent-status]))))
+               (get-in sessions-map ["claude-1" :agent-status])))
+        (is (= :running
+               (get-in sessions-map ["pi-1" :agent-status])))
+        (is (= "pi reply"
+               (get-in sessions-map ["pi-1" :last-message]))))
       (finally
         (cleanup-dir root)
         (cleanup-dir state-dir)))))
@@ -295,6 +340,70 @@
       (is (= :running
              (get-in (store/read-sessions state-dir)
                      [:sessions "claude-live" :agent-status])))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-keeps-pi-session-with-live-process-fallback
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        pi-dir (io/file root "pi/--tmp-w--")]
+    (try
+      (.mkdirs pi-dir)
+      (spit (io/file pi-dir "pi-live.jsonl")
+            (str "{\"type\":\"session\",\"version\":3,"
+                 "\"id\":\"pi-live\","
+                 "\"timestamp\":\"" (iso-before 1000) "\","
+                 "\"cwd\":\"/tmp/w\"}\n"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-in-tree
+                    (fn [pid agent-type]
+                      (when (and (= "100" pid)
+                                 (= :pi agent-type))
+                        :found))]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :pi-root (.getPath (io/file root "pi"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (is (= :running
+             (get-in (store/read-sessions state-dir)
+                     [:sessions "pi-live" :agent-status])))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-skips-pi-session-without-live-process
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        pi-dir (io/file root "pi/--tmp-w--")]
+    (try
+      (.mkdirs pi-dir)
+      (spit (io/file pi-dir "pi-dead.jsonl")
+            (str "{\"type\":\"session\",\"version\":3,"
+                 "\"id\":\"pi-dead\","
+                 "\"timestamp\":\"" (iso-before 1000) "\","
+                 "\"cwd\":\"/tmp/w\"}\n"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-in-tree
+                    (fn [_ agent-type]
+                      (when (= :pi agent-type)
+                        :not-found))]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :pi-root (.getPath (io/file root "pi"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (is (nil? (get-in (store/read-sessions state-dir)
+                        [:sessions "pi-dead"])))
       (finally
         (cleanup-dir root)
         (cleanup-dir state-dir)))))
