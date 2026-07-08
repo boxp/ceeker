@@ -248,11 +248,23 @@ Claude Code は command hook の stdin に JSON payload を渡します。payloa
 
 補足: `InstructionsLoaded` は Claude Code 側仕様で最初から非同期イベントです。
 
-### Codex（hooks — 推奨、v0.114.0+）
+### Codex（notify — 推奨）
+
+Codex の `notify` 方式を使用してください。`~/.codex/config.toml` に以下を追加します:
+
+```toml
+notify = ["ceeker", "hook", "codex"]
+```
+
+Codex は `notify` コマンドの最後の引数として JSON ペイロードを追加します（stdin ではなく argv 経由）。
+
+### Codex（hooks — 非推奨、v0.114.0+）
 
 Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) は**実験的（experimental）**な hooks エンジンで `SessionStart` / `Stop` イベントをサポートしています。
 
-> **注意:** `codex_hooks` は現在**実験的な機能**であり、将来のリリースで API が変更される可能性があります。
+> **非推奨:** Codex v0.142.5 時点では hooks エンジンは async 実行をサポートしていません。`hooks.json` の `"async"` 設定値に関わらず全hookが同期実行され、Codex の応答性が大幅に低下する可能性があります。現時点では上記の `notify` を使用してください。Codex 側で async hooks がサポートされたら再検討してください。
+>
+> `codex_hooks` は現在**実験的な機能**であり、将来のリリースで API が変更される可能性があります。
 
 #### 1. Feature flag の有効化
 
@@ -304,27 +316,15 @@ codex_hooks = true
 
 Codex hooks は Claude Code と同様に stdin 経由で JSON payload を渡します。payload には `session_id`, `cwd`, `hook_event_name`, `model`, `permission_mode`, `transcript_path` が含まれます。`SessionStart` では `source` がセッション起動方法（`"startup"` / `"resume"`）を示します。`Stop` では `last_assistant_message` も取り込みます。
 
-> **暫定的な回避策 — `async: false` が必須:** 本来は hook を非同期（`"async": true`）で実行し、agent loop をブロックしないことが望ましいですが、Codex v0.114.0 時点では async hooks は**未サポート**です。`true` に設定すると `⚠ skipping async hook ... async hooks are not supported yet` という警告が出て hook がスキップされます。暫定措置として `"async": false` を使用してください — ceeker の hook ハンドラは軽量なので agent loop への影響は軽微です。**将来 Codex が async hooks をサポートした際には `"async": true` に戻すことができます。**
-
-> **notify からの移行:** 以前 `config.toml` で `notify` を使用していた場合、`hooks.json` 設定後に `notify = ["ceeker", "hook", "codex"]` 行を削除してください。両方が有効だとイベントが重複します。
+Codex は現在 async hooks をサポートしていないため、この設定は日常利用では推奨しません。`hooks.json` と `notify` の両方が有効だと、ceeker は重複したイベントを受け取ります。
 
 #### トラブルシューティング — Codex hooks
 
 | 症状 | 原因 | 対処法 |
 |------|------|--------|
 | Codex 起動後も ceeker にセッションが表示されない | Feature flag `codex_hooks` が未有効 | `codex features enable codex_hooks` を実行、または `~/.codex/config.toml` に `[features] codex_hooks = true` を追加 |
-| `⚠ skipping async hook ... async hooks are not supported yet` | `hooks.json` で `"async": true` が設定されている（async hooks は未サポート） | 暫定的に `"async": false` に変更 |
+| Codex の応答性が明らかに低下する | Codex は現在 `"async"` の設定値に関わらず hooks を同期実行する | Codex が async hooks をサポートするまで hooks ではなく `notify` を使用 |
 | セッションイベントが重複する | `hooks.json` と `config.toml` の `notify` が両方有効 | `config.toml` から `notify` 行を削除 |
-
-### Codex（notify — フォールバック）
-
-v0.114.0 より前の Codex を使用している場合は、notify 方式を使用してください。`~/.codex/config.toml` に以下を追加:
-
-```toml
-notify = ["ceeker", "hook", "codex"]
-```
-
-Codex は `notify` コマンドの最後の引数として JSON ペイロードを追加します（stdin ではなく argv 経由）。
 
 ## セッション自動整理
 

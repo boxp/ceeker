@@ -1,5 +1,6 @@
 (ns ceeker.session-list-test
   (:require [ceeker.session-list :as session-list]
+            [ceeker.tmux.pane :as pane]
             [clojure.test :refer [deftest is testing]]))
 
 (deftest refresh-and-read-session-list-sorts-like-tui
@@ -44,6 +45,20 @@
                        nil))))))
       (is (re-find #"session list refresh failed"
                    (str err))))))
+
+(deftest refresh-session-state-closes-stale-sessions
+  (testing "list-sessions refresh still performs stale cleanup"
+    (let [closed (atom nil)
+          refreshed (atom nil)]
+      (with-redefs [pane/close-stale-sessions!
+                    (fn [state-dir]
+                      (reset! closed state-dir))
+                    pane/refresh-session-states!
+                    (fn [state-dir]
+                      (reset! refreshed state-dir))]
+        (session-list/refresh-session-state! "/tmp/ceeker-state")
+        (is (= "/tmp/ceeker-state" @closed))
+        (is (= "/tmp/ceeker-state" @refreshed))))))
 
 (deftest session->external-includes-pane-id-and-stringifies-enums
   (testing "JSON-ready map uses snake_case keys for LLM consumers"

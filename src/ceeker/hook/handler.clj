@@ -4,7 +4,6 @@
    Uses pane-id as store key when available, falling back
    to session-id for non-tmux sessions."
   (:require [ceeker.state.store :as store]
-            [ceeker.tmux.pane :as pane]
             [cheshire.core :as json]
             [clojure.string :as str]))
 
@@ -184,5 +183,4 @@
         state-dir key session-data)
        (store/update-session!
         key session-data))
-     (pane/close-stale-sessions! state-dir)
      session-data)))
