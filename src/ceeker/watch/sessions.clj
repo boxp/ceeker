@@ -294,7 +294,8 @@
                 (:session-id session))
         pane-infos (or pane-infos pane-infos-not-supplied)]
     (cond
-      (contains? terminal-statuses (:agent-status existing))
+      (and (not scan?)
+           (contains? terminal-statuses (:agent-status existing)))
       (when (and (= :closed (:agent-status existing))
                  (should-write? state session))
         (reactivate-closed-watch-session!

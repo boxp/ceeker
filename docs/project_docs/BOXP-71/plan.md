@@ -57,3 +57,18 @@ was left unchanged to keep this fix scoped.
   `:alive`, and `:unknown` liveness.
 - Kept scan behavior covered by existing tests.
 - Run `make ci` before commit.
+
+## Review Follow-up
+
+P2 review feedback found that the terminal-entry protection was also
+being applied to startup scan writes. That blocked scan from refreshing
+existing terminal store entries with newer JSONL state.
+
+- Limit existing terminal-entry protection to the watcher MODIFY path.
+- Keep scan writes governed by `should-write-scan-session?` plus the
+  existing timestamp comparison.
+- Add scan regression coverage for refreshing an existing `:completed`
+  entry from newer file content.
+- Add scan regression coverage for rewriting an existing `:closed`
+  entry when liveness is `:unknown`.
+- Keep watcher MODIFY regression coverage for terminal-entry protection.

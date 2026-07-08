@@ -257,6 +257,84 @@
         (cleanup-dir root)
         (cleanup-dir state-dir)))))
 
+(deftest test-scan-updates-existing-completed-session-from-newer-file
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        codex-dir (io/file root "codex/2026/01/01")
+        recent-ts (iso-before 1000)]
+    (try
+      (.mkdirs codex-dir)
+      (store/update-session!
+       state-dir "codex-completed"
+       {:session-id "codex-completed"
+        :agent-type :codex
+        :agent-status :completed
+        :cwd "/tmp/w"
+        :pane-id ""
+        :last-updated "2026-01-01T00:00:00Z"
+        :last-message "old done"})
+      (spit (io/file codex-dir "rollout-completed.jsonl")
+            (codex-session-lines "codex-completed" "/tmp/w"
+                                 recent-ts "task_complete"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info (fn [] nil)]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :pi-root (.getPath (io/file root "pi"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (let [session (get-in (store/read-sessions state-dir)
+                            [:sessions "codex-completed"])]
+        (is (= :completed (:agent-status session)))
+        (is (= recent-ts (:last-updated session)))
+        (is (= "done" (:last-message session))))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
+(deftest test-scan-rewrites-existing-closed-session-with-unknown-liveness
+  (let [root (temp-dir)
+        state-dir (temp-dir)
+        claude-dir (io/file root "claude/-tmp-w")]
+    (try
+      (.mkdirs claude-dir)
+      (store/update-session!
+       state-dir "claude-closed-unknown"
+       {:session-id "claude-closed-unknown"
+        :agent-type :claude-code
+        :agent-status :closed
+        :cwd "/tmp/w"
+        :pane-id ""
+        :last-updated "2026-01-01T00:00:00Z"
+        :last-message "closed"})
+      (spit (io/file claude-dir "claude-closed-unknown.jsonl")
+            (str "{\"sessionId\":\"claude-closed-unknown\","
+                 "\"cwd\":\"/tmp/w\","
+                 "\"timestamp\":\"2026-01-01T00:00:10Z\","
+                 "\"type\":\"assistant\","
+                 "\"message\":{\"content\":\"new\"}}\n"))
+      (with-redefs [sessions/resolve-pane-id (fn [_] nil)
+                    pane/list-pane-info
+                    (fn [] [{:pid "100" :pane-id "%1"
+                             :cwd "/tmp/w"}])
+                    pane/find-agent-in-tree (fn [_ _] :unknown)]
+        (sessions/scan-recent-sessions!
+         {:claude-root (.getPath (io/file root "claude"))
+          :codex-root (.getPath (io/file root "codex"))
+          :pi-root (.getPath (io/file root "pi"))
+          :state-dir state-dir
+          :since-hours 24}))
+      (let [session (get-in (store/read-sessions state-dir)
+                            [:sessions "claude-closed-unknown"])]
+        (is (= :running (:agent-status session)))
+        (is (= "2026-01-01T00:00:10Z"
+               (:last-updated session)))
+        (is (= "new" (:last-message session))))
+      (finally
+        (cleanup-dir root)
+        (cleanup-dir state-dir)))))
+
 (deftest test-scan-skips-active-session-without-live-process
   (let [root (temp-dir)
         state-dir (temp-dir)
