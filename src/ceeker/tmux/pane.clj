@@ -82,6 +82,18 @@
             (process-handle-command-line pid))))
     (catch Exception _ nil)))
 
+(defn- pgrep-child-pids
+  "Returns direct child PIDs via pgrep, or nil on failure."
+  [pid]
+  (try
+    (let [result (shell/sh "pgrep" "-P" (str pid))]
+      (if (zero? (:exit result))
+        (remove str/blank?
+                (str/split-lines
+                 (:out result)))
+        ()))
+    (catch Exception _ nil)))
+
 (defn- child-pids
   "Returns direct child PIDs of the given pid via /proc.
    Falls back to pgrep on non-Linux. Returns empty list
@@ -91,15 +103,12 @@
     (let [f (io/file (str "/proc/" pid "/task/"
                           pid "/children"))]
       (if (.exists f)
-        (remove str/blank?
-                (str/split (str/trim (slurp f)) #"\s+"))
-        (let [result (shell/sh
-                      "pgrep" "-P" (str pid))]
-          (if (zero? (:exit result))
-            (remove str/blank?
-                    (str/split-lines
-                     (:out result)))
-            ()))))
+        (try
+          (remove str/blank?
+                  (str/split (str/trim (slurp f)) #"\s+"))
+          (catch Exception _
+            (pgrep-child-pids pid)))
+        (pgrep-child-pids pid)))
     (catch Exception _ nil)))
 
 (defn- agent-pattern
@@ -121,7 +130,7 @@
         (zero? (:exit (shell/sh "kill" "-0" (str pid))))
         (catch Exception _ false)))))
 
-(declare find-agent-in-tree)
+(declare find-agent-in-tree find-agent-pid-in-tree)
 
 (defn- search-children
   "Searches child processes for an agent, returning the best
@@ -136,6 +145,13 @@
                 best)))
           :not-found
           children))
+
+(defn- search-child-pids
+  "Searches child processes for a matching agent pid."
+  [children agent-type max-depth]
+  (some #(find-agent-pid-in-tree
+          % agent-type max-depth)
+        children))
 
 (defn find-agent-in-tree
   "Searches the process tree rooted at pid for an agent
@@ -163,6 +179,27 @@
              (search-children
               children agent-type
               (dec max-depth)))))))))
+
+(defn find-agent-pid-in-tree
+  "Searches the process tree rooted at pid for an agent
+   process matching the given agent-type and returns the
+   matching pid as a string. Returns nil when not found or
+   process info is unavailable."
+  ([pid agent-type] (find-agent-pid-in-tree
+                     pid agent-type 5))
+  ([pid agent-type max-depth]
+   (when-not (neg? max-depth)
+     (let [pid-str (str pid)
+           pat (agent-pattern agent-type)
+           cmdline (read-proc-cmdline pid-str)]
+       (cond
+         (nil? cmdline) nil
+         (re-find pat cmdline) pid-str
+         :else
+         (when-let [children (child-pids pid-str)]
+           (search-child-pids
+            children agent-type
+            (dec max-depth))))))))
 
 (defn- session-has-live-agent?
   "Checks if a session's agent is alive by searching the

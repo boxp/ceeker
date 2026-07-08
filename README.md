@@ -92,6 +92,7 @@ Displays a list of all active sessions.
 **Features:**
 
 - **Auto-refresh**: Detects file changes to `sessions.edn` via inotify (Linux) / WatchService and automatically updates the TUI
+- **Session file watcher**: Detects Claude Code / Codex sessions from history JSONL files even without hooks
 - **Session filtering**: Filter the display by agent type, status, or text search
 
 **Key bindings:**
@@ -133,7 +134,7 @@ Example output:
 ]
 ```
 
-Before printing, ceeker performs one synchronous pane liveness and capture-based state refresh. If tmux refresh fails, ceeker still returns the stored session list.
+Before printing, ceeker scans recent session history files, then performs one synchronous pane liveness and capture-based state refresh. If tmux refresh fails, ceeker still returns the stored session list.
 
 ### Exit on Jump
 
@@ -161,9 +162,16 @@ You can open ceeker as a popup from anywhere inside tmux. Combine with `--exit-o
 bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker --exit-on-jump"
 ```
 
-## Setup (Required)
+## Setup
 
-After installation, you **must** configure hooks so that ceeker can receive session events from your AI coding agents.
+ceeker automatically detects Claude Code and Codex sessions by watching their session history JSONL files:
+
+- Claude Code: `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`
+- Codex: `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`
+
+This means sessions can appear in ceeker without hook configuration. Codex sessions are tracked from the session file alone, so `notify` is optional.
+
+Hooks are still useful for richer event timing and final messages, especially if you want explicit Claude Code hook events or Codex notify updates.
 
 ### Claude Code
 

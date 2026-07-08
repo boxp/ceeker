@@ -183,6 +183,35 @@
         (finally
           (cleanup-dir dir))))))
 
+(deftest test-normalize-dedupes-by-session-id-prefers-pane-key
+  (testing "same session-id is collapsed and pane-id key wins"
+    (let [sessions {"sess-1" {:session-id "sess-1"
+                              :agent-type :codex
+                              :agent-status :running
+                              :last-updated "2026-01-01T00:00:01Z"}
+                    "%7" {:session-id "sess-1"
+                          :agent-type :codex
+                          :agent-status :completed
+                          :pane-id "%7"
+                          :last-updated "2026-01-01T00:00:00Z"}}
+          normalized (store/normalize-sessions sessions)]
+      (is (= #{"%7"} (set (keys normalized))))
+      (is (= :completed
+             (:agent-status (get normalized "%7")))))))
+
+(deftest test-normalize-dedupes-by-session-id-prefers-newer-without-pane
+  (testing "same session-id without pane keeps the newest entry"
+    (let [sessions {"old-key" {:session-id "sess-1"
+                               :agent-status :running
+                               :last-updated "2026-01-01T00:00:00Z"}
+                    "new-key" {:session-id "sess-1"
+                               :agent-status :completed
+                               :last-updated "2026-01-01T00:00:02Z"}}
+          normalized (store/normalize-sessions sessions)]
+      (is (= 1 (count normalized)))
+      (is (= :completed
+             (:agent-status (first (vals normalized))))))))
+
 ;; --- update-session-if-active! ---
 
 (deftest test-update-session-if-active-running

@@ -92,6 +92,7 @@ ceeker
 **機能:**
 
 - **自動反映**: `sessions.edn` のファイル変更を inotify（Linux）/ WatchService で検知し、TUIを自動更新
+- **session履歴ファイルwatcher**: hookなしでも Claude Code / Codex の JSONL 履歴ファイルからセッションを自動検知
 - **セッション絞り込み**: エージェント種別・ステータス・テキスト検索で表示を絞り込み
 
 **キーバインド:**
@@ -133,7 +134,7 @@ ceeker --list-sessions
 ]
 ```
 
-出力前に ceeker は 1 回だけ同期的に pane 生存確認と capture ベースの状態更新を行います。tmux 更新に失敗した場合でも、保存済みの session list はそのまま返します。
+出力前に ceeker は直近の session 履歴ファイルをスキャンし、その後 1 回だけ同期的に pane 生存確認と capture ベースの状態更新を行います。tmux 更新に失敗した場合でも、保存済みの session list はそのまま返します。
 
 ### ジャンプ後に自動終了
 
@@ -161,9 +162,16 @@ tmux 内のどこからでもポップアップで ceeker を開けます。`--e
 bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker --exit-on-jump"
 ```
 
-## セットアップ（必須）
+## セットアップ
 
-インストール後、AIコーディングエージェントからセッションイベントを受信するために hook の設定が**必要**です。
+ceeker は Claude Code / Codex の session 履歴 JSONL ファイルを監視して、セッションを自動検知します:
+
+- Claude Code: `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`
+- Codex: `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`
+
+このため、hook 設定なしでも ceeker にセッションが表示されます。Codex は session ファイルだけで追跡できるため、`notify` 設定は任意です。
+
+hook は、より細かいイベントタイミングや最終メッセージを取り込みたい場合に有用です。特に Claude Code の明示的な hook イベントや Codex notify 更新を併用できます。
 
 ### Claude Code
 

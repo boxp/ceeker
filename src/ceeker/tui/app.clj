@@ -6,6 +6,7 @@
             [ceeker.tui.input :as input]
             [ceeker.tui.view :as view]
             [ceeker.tui.watcher :as watcher]
+            [ceeker.watch.sessions :as session-watch]
             [clojure.core.async :as async]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
@@ -155,6 +156,14 @@
 
 (declare create-watcher-for)
 
+(defn- start-runtime-workers [state-dir]
+  (session-watch/scan-recent-sessions!
+   {:state-dir state-dir})
+  {:stop-ch (start-pane-checker! state-dir)
+   :session-stop-ch
+   (session-watch/start-session-watcher!
+    {:state-dir state-dir})})
+
 (defn- setup-runtime
   "Creates startup resources and optionally logs timings."
   [state-dir startup-profile?]
@@ -162,8 +171,8 @@
         terminal-step (input/create-terminal-profile)
         watcher-step (timed-step
                       #(create-watcher-for state-dir))
-        checker-step (timed-step
-                      #(start-pane-checker! state-dir))]
+        workers-step (timed-step
+                      #(start-runtime-workers state-dir))]
     (when startup-profile?
       (log-startup-profile!
        {:create-terminal-build (:build-ms terminal-step)
@@ -171,11 +180,13 @@
         (:enter-raw-mode-ms terminal-step)
         :create-terminal-total (:total-ms terminal-step)
         :create-watcher (:elapsed-ms watcher-step)
-        :start-pane-checker (:elapsed-ms checker-step)
+        :start-pane-checker (:elapsed-ms workers-step)
         :total (elapsed-ms started-at)}))
     {:terminal (:terminal terminal-step)
      :watcher (:result watcher-step)
-     :stop-ch (:result checker-step)}))
+     :stop-ch (get-in workers-step [:result :stop-ch])
+     :session-stop-ch
+     (get-in workers-step [:result :session-stop-ch])}))
 
 (defn- get-terminal-height
   "Gets the current terminal height from a JLine terminal."
@@ -376,7 +387,7 @@
   ([] (start-tui! nil))
   ([state-dir] (start-tui! state-dir {}))
   ([state-dir opts]
-   (let [{:keys [terminal watcher stop-ch]}
+   (let [{:keys [terminal watcher stop-ch session-stop-ch]}
          (setup-runtime state-dir
                         (:startup-profile opts))
          exit-on-jump? (:exit-on-jump opts)
@@ -386,7 +397,10 @@
        (tui-loop terminal watcher state-dir exit-on-jump?
                  initial-display-mode)
        (finally
-         (async/close! stop-ch)
+         (when stop-ch
+           (async/close! stop-ch))
+         (when session-stop-ch
+           (async/close! session-stop-ch))
          (print "\033[2J\033[H")
          (flush)
          (watcher/close-watcher watcher)
