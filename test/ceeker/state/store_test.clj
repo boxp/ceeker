@@ -2,6 +2,7 @@
   (:require [ceeker.state.store :as store]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- temp-dir
@@ -20,6 +21,18 @@
     (when (.exists f)
       (doseq [file (reverse (file-seq f))]
         (.delete file)))))
+
+(defn- transition-log-file [dir]
+  (io/file dir "transitions.log"))
+
+(defn- transition-log-old-file [dir]
+  (io/file dir "transitions.log.old"))
+
+(defn- read-transition-log [dir]
+  (->> (slurp (transition-log-file dir))
+       str/split-lines
+       (remove str/blank?)
+       (mapv edn/read-string)))
 
 (deftest test-ensure-state-dir
   (let [dir (str (System/getProperty "java.io.tmpdir")
@@ -110,6 +123,9 @@
         (is (= {:sessions {}} result)))
       (finally
         (cleanup-dir dir)))))
+
+(deftest test-closed-ttl-is-60-seconds
+  (is (= 60000 store/closed-ttl-ms)))
 
 ;; --- Pane-centric: same pane overwrites entry ---
 
@@ -264,6 +280,28 @@
       (finally
         (cleanup-dir dir)))))
 
+(deftest test-reactivate-closed-session-appends-transition-log
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session! dir "%1"
+                             {:session-id "session-1"
+                              :agent-type :claude-code
+                              :agent-status :closed
+                              :pane-id "%1"})
+      (is (true? (store/reactivate-closed-session!
+                  dir "%1"
+                  {:agent-status :running})))
+      (let [[event] (read-transition-log dir)]
+        (is (string? (:at event)))
+        (is (= :reactivate (:event event)))
+        (is (= "%1" (:key event)))
+        (is (= "session-1" (:session-id event)))
+        (is (= :claude-code (:agent-type event)))
+        (is (= #{:at :event :key :session-id :agent-type}
+               (set (keys event)))))
+      (finally
+        (cleanup-dir dir)))))
+
 (deftest test-reactivate-non-closed-blocked
   (let [dir (temp-dir)]
     (try
@@ -336,6 +374,31 @@
       (finally
         (cleanup-dir dir)))))
 
+(deftest test-purge-expired-sessions-appends-transition-log
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session!
+       dir "%1"
+       {:session-id "session-1"
+        :agent-type :codex
+        :agent-status :closed
+        :pane-id "%1"
+        :last-updated (.toString
+                       (.minusSeconds
+                        (java.time.Instant/now) 600))})
+      (store/purge-expired-closed-sessions!
+       dir #{} 1000)
+      (let [[event] (read-transition-log dir)]
+        (is (string? (:at event)))
+        (is (= :purge (:event event)))
+        (is (= "%1" (:key event)))
+        (is (= "session-1" (:session-id event)))
+        (is (= :codex (:agent-type event)))
+        (is (= #{:at :event :key :session-id :agent-type}
+               (set (keys event)))))
+      (finally
+        (cleanup-dir dir)))))
+
 (deftest test-purge-keeps-live-pane-sessions
   (let [dir (temp-dir)]
     (try
@@ -380,6 +443,77 @@
             s2 (get-in state [:sessions "%2"])]
         (is (= :running (:agent-status s1)))
         (is (= :closed (:agent-status s2))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-close-sessions-by-pred-appends-transition-log
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session! dir "%1"
+                             {:session-id "session-1"
+                              :agent-type :pi
+                              :agent-status :running
+                              :cwd "/tmp/dead"
+                              :pane-id "%1"})
+      (store/close-sessions-by-pred!
+       dir
+       (fn [_key session]
+         (= "/tmp/dead" (:cwd session))))
+      (let [[event] (read-transition-log dir)]
+        (is (string? (:at event)))
+        (is (= :close (:event event)))
+        (is (= "%1" (:key event)))
+        (is (= "session-1" (:session-id event)))
+        (is (= :pi (:agent-type event)))
+        (is (= #{:at :event :key :session-id :agent-type}
+               (set (keys event)))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-transition-log-rotates-when-over-limit
+  (let [dir (temp-dir)
+        log-file (transition-log-file dir)
+        old-file (transition-log-old-file dir)]
+    (try
+      (store/ensure-state-dir! dir)
+      (spit log-file (apply str (repeat (+ 1048576 1) "x")))
+      (store/update-session! dir "%1"
+                             {:session-id "session-1"
+                              :agent-type :codex
+                              :agent-status :running
+                              :cwd "/tmp/dead"
+                              :pane-id "%1"})
+      (store/close-sessions-by-pred!
+       dir
+       (fn [_key _session] true))
+      (is (.exists old-file))
+      (is (< 1048576 (.length old-file)))
+      (let [[event] (read-transition-log dir)]
+        (is (= :close (:event event)))
+        (is (= "session-1" (:session-id event))))
+      (finally
+        (cleanup-dir dir)))))
+
+(deftest test-transition-log-failure-does-not-fail-state-change
+  (let [dir (temp-dir)]
+    (try
+      (store/update-session! dir "%1"
+                             {:session-id "session-1"
+                              :agent-type :codex
+                              :agent-status :running
+                              :cwd "/tmp/dead"
+                              :pane-id "%1"})
+      (.mkdirs (transition-log-file dir))
+      (let [err (java.io.StringWriter.)]
+        (binding [*err* err]
+          (store/close-sessions-by-pred!
+           dir
+           (fn [_key _session] true)))
+        (is (str/includes? (str err)
+                           "Failed to write transition log")))
+      (is (= :closed
+             (get-in (store/read-sessions dir)
+                     [:sessions "%1" :agent-status])))
       (finally
         (cleanup-dir dir)))))
 
