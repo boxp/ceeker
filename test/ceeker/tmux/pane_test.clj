@@ -3,6 +3,7 @@
             [ceeker.tmux.capture :as capture]
             [ceeker.tmux.pane :as pane]
             [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- temp-dir
@@ -319,6 +320,25 @@
                   (fn [_] true)]
       (is (= "11" (pane/find-agent-pid-in-tree
                    "10" :codex))))))
+
+(deftest test-child-pids-falls-back-to-pgrep-when-proc-read-fails
+  (testing "uses pgrep fallback when /proc children exists but slurp fails"
+    (let [calls (atom [])]
+      (with-redefs [clojure.java.io/file
+                    (fn [& _]
+                      (proxy [java.io.File] [""]
+                        (exists [] true)))
+                    clojure.core/slurp
+                    (fn [_]
+                      (throw (java.io.IOException.
+                              "Invalid argument")))
+                    shell/sh
+                    (fn [& args]
+                      (swap! calls conj args)
+                      {:exit 0 :out "311293\n" :err ""})]
+        (is (= ["311293"]
+               (#'ceeker.tmux.pane/child-pids "1486")))
+        (is (= [["pgrep" "-P" "1486"]] @calls))))))
 
 ;; --- stale session tests ---
 

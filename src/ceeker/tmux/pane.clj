@@ -82,6 +82,18 @@
             (process-handle-command-line pid))))
     (catch Exception _ nil)))
 
+(defn- pgrep-child-pids
+  "Returns direct child PIDs via pgrep, or nil on failure."
+  [pid]
+  (try
+    (let [result (shell/sh "pgrep" "-P" (str pid))]
+      (if (zero? (:exit result))
+        (remove str/blank?
+                (str/split-lines
+                 (:out result)))
+        ()))
+    (catch Exception _ nil)))
+
 (defn- child-pids
   "Returns direct child PIDs of the given pid via /proc.
    Falls back to pgrep on non-Linux. Returns empty list
@@ -91,15 +103,12 @@
     (let [f (io/file (str "/proc/" pid "/task/"
                           pid "/children"))]
       (if (.exists f)
-        (remove str/blank?
-                (str/split (str/trim (slurp f)) #"\s+"))
-        (let [result (shell/sh
-                      "pgrep" "-P" (str pid))]
-          (if (zero? (:exit result))
-            (remove str/blank?
-                    (str/split-lines
-                     (:out result)))
-            ()))))
+        (try
+          (remove str/blank?
+                  (str/split (str/trim (slurp f)) #"\s+"))
+          (catch Exception _
+            (pgrep-child-pids pid)))
+        (pgrep-child-pids pid)))
     (catch Exception _ nil)))
 
 (defn- agent-pattern
