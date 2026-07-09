@@ -257,9 +257,12 @@
 
 (deftest test-start-runtime-workers-returns-immediately
   (testing "start-runtime-workers returns without blocking on scan"
-    (let [blocker (promise)]
+    (let [blocker (promise)
+          entered (promise)]
       (with-redefs [ceeker.watch.sessions/scan-recent-sessions!
-                    (fn [_] @blocker)
+                    (fn [_]
+                      (deliver entered true)
+                      @blocker)
                     ceeker.tui.app/start-pane-checker!
                     (fn [_] :stop-ch)
                     ceeker.watch.sessions/start-session-watcher!
@@ -267,6 +270,8 @@
         (let [t0 (System/nanoTime)
               result (#'ceeker.tui.app/start-runtime-workers nil)
               elapsed (/ (- (System/nanoTime) t0) 1000000.0)]
+          (is (deref entered 2000 false)
+              "background scan should enter stub")
           (is (< elapsed 500)
               "should return immediately without waiting for scan")
           (is (= :stop-ch (:stop-ch result)))
