@@ -157,8 +157,14 @@
 (declare create-watcher-for)
 
 (defn- start-runtime-workers [state-dir]
-  (session-watch/scan-recent-sessions!
-   {:state-dir state-dir})
+  (async/thread
+    (try
+      (session-watch/scan-recent-sessions!
+       {:state-dir state-dir})
+      (catch Exception e
+        (.println System/err
+                  (str "ceeker: scan-recent-sessions! failed: "
+                       (.getMessage e))))))
   {:stop-ch (start-pane-checker! state-dir)
    :session-stop-ch
    (session-watch/start-session-watcher!

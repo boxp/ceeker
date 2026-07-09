@@ -255,6 +255,24 @@
 
 ;; --- core.async pane checker tests ---
 
+(deftest test-start-runtime-workers-returns-immediately
+  (testing "start-runtime-workers returns without blocking on scan"
+    (let [blocker (promise)]
+      (with-redefs [ceeker.watch.sessions/scan-recent-sessions!
+                    (fn [_] @blocker)
+                    ceeker.tui.app/start-pane-checker!
+                    (fn [_] :stop-ch)
+                    ceeker.watch.sessions/start-session-watcher!
+                    (fn [_] :session-stop-ch)]
+        (let [t0 (System/nanoTime)
+              result (#'ceeker.tui.app/start-runtime-workers nil)
+              elapsed (/ (- (System/nanoTime) t0) 1000000.0)]
+          (is (< elapsed 500)
+              "should return immediately without waiting for scan")
+          (is (= :stop-ch (:stop-ch result)))
+          (is (= :session-stop-ch (:session-stop-ch result)))
+          (deliver blocker :done))))))
+
 (deftest test-start-pane-checker-returns-immediately
   (testing "start-pane-checker! returns without blocking"
     (let [blocker (promise)]
