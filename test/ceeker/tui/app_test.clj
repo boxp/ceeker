@@ -364,14 +364,18 @@
 
 (deftest test-start-tui-logs-startup-profile-when-enabled
   (testing "start-tui! logs setup timings to stderr"
-    (let [err (java.io.StringWriter.)]
+    (let [err (java.io.StringWriter.)
+          entered (promise)
+          blocker (promise)]
       (binding [*err* err]
         (with-redefs [ceeker.tui.app/create-watcher-for
                       (fn [_] :watcher)
                       ceeker.tui.app/start-pane-checker!
                       (fn [_] :stop-ch)
                       ceeker.watch.sessions/scan-recent-sessions!
-                      (fn [_])
+                      (fn [_]
+                        (deliver entered true)
+                        @blocker)
                       ceeker.watch.sessions/start-session-watcher!
                       (fn [_] :session-stop-ch)
                       ceeker.tui.app/tui-loop
@@ -388,7 +392,10 @@
                       (fn [_])
                       async/close!
                       (fn [_])]
-          (app/start-tui! nil {:startup-profile true})))
+          (app/start-tui! nil {:startup-profile true})
+          (is (deref entered 2000 false)
+              "background scan should enter stub")
+          (deliver blocker nil)))
       (let [output (str err)]
         (is (str/includes? output "ceeker: startup-profile"))
         (is (str/includes? output "create-terminal.build="))
@@ -401,14 +408,18 @@
 
 (deftest test-start-tui-skips-startup-profile-when-disabled
   (testing "start-tui! does not log timings without option"
-    (let [err (java.io.StringWriter.)]
+    (let [err (java.io.StringWriter.)
+          entered (promise)
+          blocker (promise)]
       (binding [*err* err]
         (with-redefs [ceeker.tui.app/create-watcher-for
                       (fn [_] :watcher)
                       ceeker.tui.app/start-pane-checker!
                       (fn [_] :stop-ch)
                       ceeker.watch.sessions/scan-recent-sessions!
-                      (fn [_])
+                      (fn [_]
+                        (deliver entered true)
+                        @blocker)
                       ceeker.watch.sessions/start-session-watcher!
                       (fn [_] :session-stop-ch)
                       ceeker.tui.app/tui-loop
@@ -425,7 +436,10 @@
                       (fn [_])
                       async/close!
                       (fn [_])]
-          (app/start-tui! nil {})))
+          (app/start-tui! nil {})
+          (is (deref entered 2000 false)
+              "background scan should enter stub")
+          (deliver blocker nil)))
       (is (= "" (str err))))))
 
 ;; --- exit-on-jump tests ---
@@ -508,13 +522,17 @@
 (deftest test-start-tui-passes-initial-display-mode
   (testing "start-tui! passes configured startup view into tui-loop"
     (let [received (atom nil)
-          stop-ch (async/chan)]
+          stop-ch (async/chan)
+          entered (promise)
+          blocker (promise)]
       (with-redefs [ceeker.tui.app/create-watcher-for
                     (fn [_] nil)
                     ceeker.tui.app/start-pane-checker!
                     (fn [_] stop-ch)
                     ceeker.watch.sessions/scan-recent-sessions!
-                    (fn [_])
+                    (fn [_]
+                      (deliver entered true)
+                      @blocker)
                     ceeker.watch.sessions/start-session-watcher!
                     (fn [_] (async/chan))
                     ceeker.tui.input/create-terminal-profile
@@ -535,5 +553,8 @@
                                         initial-display-mode]))]
         (app/start-tui! nil {:exit-on-jump true
                              :initial-display-mode :card})
+        (is (deref entered 2000 false)
+            "background scan should enter stub")
+        (deliver blocker nil)
         (is (= [::terminal nil nil true :card]
                @received))))))
