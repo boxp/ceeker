@@ -47,3 +47,23 @@ and dedup cleanup. By making pane-id the unique key, all these problems vanish.
 3. Different pane-ids = separate entries
 4. No session-id in display output
 5. Regression: stale detection, purge, reactivation all work
+
+## Test stabilization follow-up
+
+PR #79 also has a nondeterministic test around `start-runtime-workers`. The function
+starts `scan-recent-sessions!` in an `async/thread` and returns immediately, so the
+test must keep `with-redefs` active until the background thread has actually entered
+the stubbed function.
+
+Follow-up steps:
+
+1. Add an `entered` promise in the `scan-recent-sessions!` stub.
+2. Wait for `entered` inside the `with-redefs` scope before assertions that depend on
+   the stub being active.
+3. Keep the existing assertion that `start-runtime-workers` returns immediately and
+   still returns the expected worker handles.
+4. Release the blocked scan stub with `deliver blocker :done` after the assertions.
+
+Verification note: `clojure` is not available in this environment, so compile/test
+execution is not expected here. Validate the Clojure syntax by reviewing the edited
+form and commit the scoped test fix.
