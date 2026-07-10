@@ -732,8 +732,8 @@
       (is (= :completed (:agent-status result)))
       (is (= "session ended" (:last-message result))))))
 
-(deftest test-store-key-falls-back-to-session-id
-  (testing "handle-hook! falls back to session-id when no pane"
+(deftest test-non-tmux-claude-lifecycle-uses-one-session-id-key
+  (testing "SessionStart and Stop merge by session-id when no pane"
     (let [dir (temp-dir)]
       (try
         (with-redefs [handler/current-pane-id
@@ -743,10 +743,18 @@
            (json/generate-string
             {:session_id "outside-tmux"
              :cwd "/tmp/work"}))
+          (handler/handle-hook!
+           dir "claude" "Stop"
+           (json/generate-string
+            {:session_id "outside-tmux"
+             :cwd "/tmp/work"
+             :last_assistant_message "Finished outside tmux."}))
           (let [sessions (:sessions
-                          (store/read-sessions dir))]
+                          (store/read-sessions dir))
+                session (get sessions "outside-tmux")]
             (is (= 1 (count sessions)))
-            (is (some? (get sessions "outside-tmux"))
-                "Key should be session-id when no pane")))
+            (is (= :completed (:agent-status session)))
+            (is (= "Finished outside tmux."
+                   (:last-message session)))))
         (finally
           (cleanup-dir dir))))))
