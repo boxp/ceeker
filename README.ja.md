@@ -164,21 +164,40 @@ bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker --
 
 ## セットアップ
 
-ceeker は Claude Code / Codex / pi の session 履歴 JSONL ファイルを監視して、セッションを自動検知します:
+通常の tmux 利用では、agent 側の設定は不要です。ceeker をインストール後、
+tmux 内で Claude Code / Codex / pi を起動し、次を実行するだけです:
+
+```bash
+ceeker
+```
+
+ceeker は次の session 履歴 JSONL ファイルを監視して、セッションを自動検知します:
 
 - Claude Code: `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`
 - Codex: `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`
 - pi: `~/.pi/agent/sessions/<cwd-slug>/<timestamp>_<uuid>.jsonl`
 
-このため、hook 設定なしでも ceeker にセッションが表示されます。Codex と pi は session ファイルだけで追跡できるため、Codex の `notify` 設定は任意で、pi 側に ceeker 専用設定は不要です。
+watcher は Claude Code と pi の assistant entry、および Codex の
+`task_complete.last_agent_message` から最新の assistant message も読み取ります。
+したがって、セッション検知、状態更新、`last-message` は hook や Codex
+`notify` に依存しません。
 
-hook は、より細かいイベントタイミングや最終メッセージを取り込みたい場合に有用です。特に Claude Code の明示的な hook イベントや Codex notify 更新を併用できます。将来の pi extension 連携向けに `ceeker hook pi <event>` も受け付けますが、pi の自動検知には不要です。
+ceeker は cwd、agent process、利用可能な場合は process の `TMUX_PANE` を使って
+セッションと pane を対応付けます。同じ cwd で同種 agent を複数 pane に起動し、
+pane の自動解決が曖昧な場合、セッションは一覧に出てもジャンプ先が付かないことが
+あります。その場合は、以下の任意設定で pane ID を明示できます。
 
-### Claude Code
+### agent の任意設定
 
-`.claude/settings.json` に以下を追加してください（[Claude Code hooks 公式リファレンス](https://code.claude.com/docs/en/hooks) 準拠の3レベルネスト形式）。
+通常の tmux 利用では追加しないでください。用途は次の場合だけです:
 
-ceeker をメトリクス送信用途として使う前提で、agent ループをブロックしないよう command hook は `"async": true` を付けて非同期実行にします。
+- tmux 外で動くセッションを登録する
+- pane の自動解決が曖昧な場合に紐付け精度を上げる
+
+#### Claude Code（任意）
+
+上記の用途がある場合だけ、[hooks 公式リファレンス](https://code.claude.com/docs/en/hooks)
+に従い、`.claude/settings.json` に async の `SessionStart` / `Stop` だけを追加します:
 
 ```json
 {
@@ -194,39 +213,6 @@ ceeker をメトリクス送信用途として使う前提で、agent ループ�
         ]
       }
     ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook claude Notification",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook claude PreToolUse",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook claude PostToolUse",
-            "async": true
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
@@ -237,103 +223,40 @@ ceeker をメトリクス送信用途として使う前提で、agent ループ�
           }
         ]
       }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook claude SubagentStop",
-            "async": true
-          }
-        ]
-      }
     ]
   }
 }
 ```
 
-Claude Code は command hook の stdin に JSON payload を渡します。payload には `session_id`, `cwd`, `hook_event_name` などの共通フィールドが含まれます（[hooks リファレンス](https://code.claude.com/docs/en/hooks) 参照）。`Stop` / `SubagentStop` では `last_assistant_message` も取り込み、ceeker の `last-message` として表示します。
+Claude Code は hook payload を stdin へ渡します。`SessionStart` でセッションを
+登録し、`Stop` で終了状態と `last_assistant_message` を記録します。
 
-補足: `InstructionsLoaded` は Claude Code 側仕様で最初から非同期イベントです。
+#### Codex notify（任意）
 
-### Codex（notify — 推奨）
-
-Codex の `notify` 方式を使用してください。`~/.codex/config.toml` に以下を追加します:
+同じ例外用途では、Codex
+[`notify`](https://developers.openai.com/codex/config-advanced#notifications) から
+turn 完了更新を ceeker へ送れます。ユーザーレベルの `~/.codex/config.toml`
+に次を追加します:
 
 ```toml
 notify = ["ceeker", "hook", "codex"]
 ```
 
-Codex は `notify` コマンドの最後の引数として JSON ペイロードを追加します（stdin ではなく argv 経由）。
+Codex は対応する通知（現在は `agent-turn-complete`）ごとに JSON payload を
+引数として1件追加します。この設定は任意で、`last-message` の取得には不要です。
 
-### Codex（hooks — 非推奨、v0.114.0+）
+[Codex lifecycle hooks](https://developers.openai.com/codex/hooks) は ceeker の
+日常利用では推奨しません。Codex の command hooks は同期実行され、`async` を
+指定した handler は現在スキップされます。通常の監視経路は session-file watcher
+で完結するため、ceeker のためだけに Codex hooks を有効化しないでください。
+既存の `ceeker hook codex ...` 設定は後方互換として引き続き受理します。hooks と
+`notify` を両方有効にすると、ceeker に重複した更新が届きます。
 
-Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) は**実験的（experimental）**な hooks エンジンで `SessionStart` / `Stop` イベントをサポートしています。
+#### pi
 
-> **非推奨:** Codex v0.142.5 時点では hooks エンジンは async 実行をサポートしていません。`hooks.json` の `"async"` 設定値に関わらず全hookが同期実行され、Codex の応答性が大幅に低下する可能性があります。現時点では上記の `notify` を使用してください。Codex 側で async hooks がサポートされたら再検討してください。
->
-> `codex_hooks` は現在**実験的な機能**であり、将来のリリースで API が変更される可能性があります。
-
-#### 1. Feature flag の有効化
-
-hooks エンジンは feature flag の有効化が**必須**です。`hooks.json` を追加する**前に**以下を実行してください:
-
-```bash
-codex features enable codex_hooks
-```
-
-または `~/.codex/config.toml` に以下を追加:
-
-```toml
-[features]
-codex_hooks = true
-```
-
-> このフラグが無効の場合、`hooks.json` は無視され、hook イベントは発火しません。
-
-#### 2. `~/.codex/hooks.json` の追加
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook codex SessionStart",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook codex Stop",
-            "async": false
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Codex hooks は Claude Code と同様に stdin 経由で JSON payload を渡します。payload には `session_id`, `cwd`, `hook_event_name`, `model`, `permission_mode`, `transcript_path` が含まれます。`SessionStart` では `source` がセッション起動方法（`"startup"` / `"resume"`）を示します。`Stop` では `last_assistant_message` も取り込みます。
-
-Codex は現在 async hooks をサポートしていないため、この設定は日常利用では推奨しません。`hooks.json` と `notify` の両方が有効だと、ceeker は重複したイベントを受け取ります。
-
-#### トラブルシューティング — Codex hooks
-
-| 症状 | 原因 | 対処法 |
-|------|------|--------|
-| Codex 起動後も ceeker にセッションが表示されない | Feature flag `codex_hooks` が未有効 | `codex features enable codex_hooks` を実行、または `~/.codex/config.toml` に `[features] codex_hooks = true` を追加 |
-| Codex の応答性が明らかに低下する | Codex は現在 `"async"` の設定値に関わらず hooks を同期実行する | Codex が async hooks をサポートするまで hooks ではなく `notify` を使用 |
-| セッションイベントが重複する | `hooks.json` と `config.toml` の `notify` が両方有効 | `config.toml` から `notify` 行を削除 |
+pi 側に ceeker 専用設定は不要です。custom extension との互換用に
+`ceeker hook pi <event>` は引き続き受理しますが、自動監視には pi の session
+ファイルを使います。
 
 ## セッション自動整理
 

@@ -164,21 +164,42 @@ bind-key C-k display-popup -h 80% -w 80% -d "#{pane_current_path}" -E "ceeker --
 
 ## Setup
 
-ceeker automatically detects Claude Code, Codex, and pi sessions by watching their session history JSONL files:
+For normal tmux use, no agent configuration is required. After installing ceeker,
+start Claude Code, Codex, or pi in tmux and run:
+
+```bash
+ceeker
+```
+
+ceeker automatically detects sessions by watching their history JSONL files:
 
 - Claude Code: `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`
 - Codex: `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`
 - pi: `~/.pi/agent/sessions/<cwd-slug>/<timestamp>_<uuid>.jsonl`
 
-This means sessions can appear in ceeker without hook configuration. Codex and pi sessions are tracked from the session file alone, so Codex `notify` is optional and pi does not need ceeker-specific setup.
+The watcher also reads the latest assistant message from Claude Code and pi
+assistant entries and from Codex `task_complete.last_agent_message`. Session
+discovery, status updates, and `last-message` therefore do not depend on hooks or
+Codex `notify`.
 
-Hooks are still useful for richer event timing and final messages, especially if you want explicit Claude Code hook events or Codex notify updates. `ceeker hook pi <event>` is accepted for future pi extension integrations, but it is not required for automatic pi discovery.
+ceeker matches a session to a pane using its working directory, the agent process,
+and the process's `TMUX_PANE` when available. If the same agent type runs in
+multiple panes with the same working directory and pane resolution is ambiguous,
+the session can still be listed without a jump target. The optional integrations
+below can provide an explicit pane ID in that case.
 
-### Claude Code
+### Optional agent integration
 
-Add the following to `.claude/settings.json` (using the 3-level nesting format per the [official hooks reference](https://code.claude.com/docs/en/hooks)).
+Do not add these settings for ordinary tmux use. They are only useful to:
 
-For ceeker's metrics-only use case, command hooks are configured with `"async": true` so they run in the background and do not block the agent loop.
+- register a session that runs outside tmux, or
+- improve pane binding when automatic resolution is ambiguous.
+
+#### Claude Code (optional)
+
+If one of those cases applies, add only asynchronous `SessionStart` and `Stop`
+hooks to `.claude/settings.json` using the format from the
+[official hooks reference](https://code.claude.com/docs/en/hooks):
 
 ```json
 {
@@ -194,39 +215,6 @@ For ceeker's metrics-only use case, command hooks are configured with `"async": 
         ]
       }
     ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook claude Notification",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook claude PreToolUse",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook claude PostToolUse",
-            "async": true
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
@@ -237,103 +225,41 @@ For ceeker's metrics-only use case, command hooks are configured with `"async": 
           }
         ]
       }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook claude SubagentStop",
-            "async": true
-          }
-        ]
-      }
     ]
   }
 }
 ```
 
-Claude Code passes a JSON payload to command hooks via stdin. The payload contains common fields such as `session_id`, `cwd`, and `hook_event_name` (see the [hooks reference](https://code.claude.com/docs/en/hooks)). For `Stop` and `SubagentStop`, ceeker also captures `last_assistant_message` and shows it as the session's `last-message`.
+Claude Code passes the hook payload via stdin. `SessionStart` registers the
+session and `Stop` records its terminal state and `last_assistant_message`.
 
-Note: `InstructionsLoaded` is an event that is already asynchronous by design on the Claude Code side.
+#### Codex notify (optional)
 
-### Codex (notify — recommended)
-
-Use Codex's `notify` mechanism. Add the following to `~/.codex/config.toml`:
+For the same exceptional cases, Codex
+[`notify`](https://developers.openai.com/codex/config-advanced#notifications) can
+send turn-complete updates to ceeker. Add this user-level setting to
+`~/.codex/config.toml`:
 
 ```toml
 notify = ["ceeker", "hook", "codex"]
 ```
 
-Codex appends the JSON payload as the last argument of the `notify` command (via argv, not stdin).
+Codex appends one JSON payload argument for each supported notification (currently
+`agent-turn-complete`). This is optional and is not needed for `last-message`.
 
-### Codex (hooks — not recommended, v0.114.0+)
+[Codex lifecycle hooks](https://developers.openai.com/codex/hooks) are not
+recommended for everyday ceeker use. Codex command hooks run synchronously;
+handlers marked `async` are currently skipped. Since the session-file watcher
+already supplies the normal monitoring path, do not enable Codex hooks only for
+ceeker. Existing `ceeker hook codex ...` configurations remain accepted for
+backward compatibility; if both hooks and `notify` are enabled, ceeker receives
+redundant updates.
 
-Codex [v0.114.0+](https://github.com/openai/codex/releases/tag/rust-v0.114.0) supports `SessionStart` and `Stop` events via its **experimental** hooks engine.
+#### pi
 
-> **Not recommended:** As of Codex v0.142.5, the hooks engine does not support async execution. Hooks run synchronously regardless of the `"async"` value in `hooks.json`, which can significantly reduce Codex responsiveness. Use `notify` above for now. Reconsider hooks after Codex adds async hooks support.
->
-> The `codex_hooks` feature is currently **experimental** and its API may change in future releases.
-
-#### 1. Enable the feature flag
-
-The hooks engine is gated behind a feature flag. Enable it **before** adding `hooks.json`:
-
-```bash
-codex features enable codex_hooks
-```
-
-Or add the following to `~/.codex/config.toml`:
-
-```toml
-[features]
-codex_hooks = true
-```
-
-> Without this flag, `hooks.json` will be ignored and no hook events will fire.
-
-#### 2. Add `~/.codex/hooks.json`
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook codex SessionStart",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ceeker hook codex Stop",
-            "async": false
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Codex hooks pass a JSON payload via stdin (same as Claude Code). The payload contains `session_id`, `cwd`, `hook_event_name`, `model`, `permission_mode`, and `transcript_path`. For `SessionStart`, `source` indicates whether the session was started fresh (`"startup"`) or resumed (`"resume"`). For `Stop`, ceeker also captures `last_assistant_message`.
-
-Because async hooks are not currently supported by Codex, this setup is not recommended for day-to-day use. If both `hooks.json` and `notify` are active, ceeker will receive duplicate events.
-
-#### Troubleshooting — Codex hooks
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| No session appears in ceeker after starting Codex | Feature flag `codex_hooks` is not enabled | Run `codex features enable codex_hooks` or add `[features] codex_hooks = true` to `~/.codex/config.toml` |
-| Codex becomes noticeably less responsive | Codex currently runs hooks synchronously regardless of the `"async"` value | Use `notify` instead of hooks until Codex supports async hooks |
-| Duplicate session events | Both `hooks.json` and `notify` in `config.toml` are active | Remove the `notify` line from `config.toml` |
+pi needs no ceeker-specific settings. `ceeker hook pi <event>` remains accepted
+for compatibility with custom extensions, but automatic monitoring uses the pi
+session file.
 
 ## Automatic Session Cleanup
 

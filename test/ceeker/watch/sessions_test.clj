@@ -153,7 +153,7 @@
       (is (= "%8" (sessions/resolve-pane-id
                    {:cwd "/tmp/w" :agent-type :codex}))))))
 
-(deftest test-scan-recent-sessions
+(deftest test-scan-recent-sessions-without-hooks-keeps-last-messages
   (let [root (temp-dir)
         state-dir (temp-dir)
         codex-dir (io/file root "codex/2026/01/01")
@@ -176,7 +176,8 @@
       (spit (io/file claude-dir "claude-1.jsonl")
             (str "{\"sessionId\":\"claude-1\",\"cwd\":\"/tmp/w\","
                  "\"timestamp\":\"" recent-ts "\","
-                 "\"type\":\"user\"}\n"))
+                 "\"type\":\"assistant\","
+                 "\"message\":{\"content\":\"claude reply\"}}\n"))
       (spit (io/file pi-dir "2026-01-01T00-00-00-000Z_pi.jsonl")
             (str "{\"type\":\"session\",\"version\":3,"
                  "\"id\":\"pi-1\","
@@ -202,6 +203,8 @@
                (get-in sessions-map ["codex-1" :last-message])))
         (is (= :running
                (get-in sessions-map ["claude-1" :agent-status])))
+        (is (= "claude reply"
+               (get-in sessions-map ["claude-1" :last-message])))
         (is (= :running
                (get-in sessions-map ["pi-1" :agent-status])))
         (is (= "pi reply"
